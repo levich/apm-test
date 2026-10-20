@@ -1,5 +1,7 @@
 # Контейнер APM с существующим Angie
 
+Общий порядок выбора установки, проверки, резервного копирования и обслуживания приведён в [подробной инструкции по развёртыванию](DEPLOYMENT.md).
+
 Этот вариант предназначен для Linux-сервера, на котором Angie уже установлен и обслуживает сайты. Manager и worker запускаются из одного образа APM в Docker, агент APM работает на хосте рядом с Angie и использует его бинарный файл, основной конфиг и PID для проверки и reload. Второй Angie не запускается.
 
 APM генерирует свои HTTP/stream-включения. Основной конфиг, прежние виртуальные хосты, модули, `user`, `pid`, `events` и настройки процессов остаются под управлением администратора. Существующие сайты не появляются в панели автоматически: переносите их отдельно, исключая дублирование доменов и портов.
@@ -137,7 +139,26 @@ sudo systemctl start apm-agent
 docker compose --env-file .env.existing -f compose.existing.yaml up -d
 ```
 
-При restore остановите manager, worker, агент и сам Angie, чтобы current и PEM не менялись под работающим сервером. Выполните `run --rm --no-deps manager restore /srv/apm/exports/BACKUP_ID.apm` с теми же Compose-флагами. Затем запустите Angie, агент и контейнеры; снова задайте пароль будущих копий. Возврат внешней конфигурации остаётся отдельной операцией администратора.
+При restore остановите manager, worker, агент и сам Angie, чтобы current и PEM не менялись под работающим сервером. Выполните `run --rm --no-deps manager restore /srv/apm/exports/BACKUP_ID.apm` с теми же Compose-флагами. Restore удаляет активную ссылку `current`: перед запуском системного Angie создайте начальные включения из восстановленных данных. Из `/opt/apm`, с путями своей установки:
+
+```sh
+sudo /opt/apm/.venv/bin/python - <<'PY'
+import os
+from apm.agent import Agent
+from apm.config import Settings
+
+os.setgid(10001)
+os.umask(0o007)
+Agent(Settings(_env_file="/opt/apm/.env.existing")).initialize()
+PY
+
+sudo /usr/sbin/angie -p /etc/angie -t -c /etc/angie/angie.conf
+sudo systemctl start angie
+sudo systemctl start apm-agent
+docker compose --env-file .env.existing -f compose.existing.yaml up -d
+```
+
+Дождитесь успешного применения восстановленного желаемого состояния и снова задайте пароль будущих копий. Копирование архива и полный порядок restore описаны в [разделе восстановления](DEPLOYMENT.md#maintenance). Возврат внешней конфигурации остаётся отдельной операцией администратора.
 
 Для отключения остановите worker, удалите две строки include APM и виртуальный хост панели из основного конфига, проверьте `angie -t` и выполните reload, затем остановите агент и Compose. Сохраните данные для восстановления.
 

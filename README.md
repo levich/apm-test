@@ -17,6 +17,8 @@
 
 ## Быстрый запуск на Linux
 
+Подробный порядок установки, настройки, проверки, обновления и восстановления для всех вариантов: [инструкция по развёртыванию](docs/DEPLOYMENT.md).
+
 Нужен обычный rootful Docker Engine и Compose v2 на Linux amd64/arm64. Порты 80, 81, 443, 8181 и 18081 должны быть свободны; для HTTP/3 нужен UDP/443. Angie использует host network.
 
 ```sh
@@ -110,12 +112,14 @@ uv run --no-sync python scripts/check_angie.py \
 
 ## Docker labels
 
+Для Docker на другой машине используйте [инструкцию удалённого discovery](docs/DEPLOYMENT.md#remote-docker): gateway по VPN и отдельную маршрутизацию Angie к IP контейнеров.
+
 Разрешите discovery в `.env`, задайте списки сетей и доменных зон. У контейнера должны быть IPv4-адрес в разрешённой сети и явно указанный порт приложения.
 
 ```dotenv
 APM_DISCOVERY_ENABLED=true
-APM_DISCOVERY_NETWORKS=["apps"]
-APM_DISCOVERY_DOMAINS=["example.com"]
+APM_DISCOVERY_NETWORKS='["apps"]'
+APM_DISCOVERY_DOMAINS='["example.com"]'
 APM_DISCOVERY_ACME_TERMS_AGREED=true
 APM_ACME_EMAIL=admin@example.com
 ```
@@ -193,10 +197,14 @@ Access logs включаются явно в runtime; журнал действ�
 
 CrowdSec использует закреплённую официальную Lua-библиотеку и собственный адаптер. На сервере допускается один общий профиль bouncer. AppSec требует буферизации; нечитаемые тела HTTP/2–3 отклоняются. Полная приёмка CAPTCHA, больших тел, streaming и отказов ещё впереди. GeoIP-профиль принимает MaxMind `account_id` и `license_key` и обновляет версии Country/ASN по отдельному заданию.
 
+Пошаговая настройка: [CrowdSec / AppSec](docs/DEPLOYMENT.md#crowdsec), [GeoIP и базы MaxMind](docs/DEPLOYMENT.md#geoip).
+
 Произвольные директивы и pre-run hooks предназначены для доверенного администратора. Hooks монтируются из конфигурации развёртывания в `/etc/apm/pre-run.d`; HTTP API не принимает команды. Локальные команды восстановления: `apm reset-password EMAIL --reset-mfa`, `apm resume-applies`.
 
 ## Документы и лицензии
 
+- [Подробная инструкция по развёртыванию](docs/DEPLOYMENT.md)
+- [Таблица модулей, функций и требований Angie PRO](docs/MODULES.md)
 - [Согласованный план реализации 1.0](PLAN.md)
 - [Архитектура и API](docs/ARCHITECTURE.md)
 - [Контейнер APM с существующим Angie](docs/EXISTING_ANGIE.md)
