@@ -1,0 +1,54 @@
+{
+  "tabler.min.css": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/core@1.6.0/dist/css/tabler.min.css",
+    "sha256": "f29047a25b9911e63f37028c9124d545bfc9b9192616c59432a522080b8a00bc"
+  },
+  "tabler.min.js": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/core@1.6.0/dist/js/tabler.min.js",
+    "sha256": "84a664b03e59118a0ace24eda41c2491ea952761599e0cf38256132c72cbf384"
+  },
+  "htmx.min.js": {
+    "source": "https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/dist/htmx.min.js",
+    "sha256": "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717"
+  },
+  "swagger-ui-bundle.js": {
+    "source": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.30.1/swagger-ui-bundle.js",
+    "sha256": "28cbd2a32f367a2ce7b46a54b585653ecd9c02bf68d1f7f85d1457b43467d55f"
+  },
+  "swagger-ui.css": {
+    "source": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.30.1/swagger-ui.css",
+    "sha256": "365a771d892db56cee356c703d9dc39a47c91aa5e6c3a173c1cb95e0a47b716e"
+  },
+  "TABLER-LICENSE": {
+    "source": "https://raw.githubusercontent.com/tabler/tabler/@tabler/core@1.6.0/LICENSE",
+    "sha256": "4f88a82d13be3c5c63a12c5631eae914aa4381b6dc17641bf1ab85f3f8f6c8a5"
+  },
+  "ICONS-LICENSE": {
+    "source": "https://raw.githubusercontent.com/tabler/tabler-icons/v3.34.1/LICENSE",
+    "sha256": "d5a3f948ae5cb95bfc4d2f767ef2bf6a778815b0ddb2d1c48037744cf636518e"
+  },
+  "HTMX-LICENSE": {
+    "source": "https://cdn.jsdelivr.net/npm/htmx.org@2.0.11/LICENSE",
+    "sha256": "d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38"
+  },
+  "SWAGGER-LICENSE": {
+    "source": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.30.1/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "icon:server": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/icons@3.34.1/icons/outline/server.svg",
+    "sha256": "ddd9500bea0c2f77ebfffc8570a32c6f2d132c45092facf4c020a22d69cf07fc"
+  },
+  "icon:shield": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/icons@3.34.1/icons/outline/shield.svg",
+    "sha256": "1c87b94ec72992bb217ca6741f1f372058183c0158891df0b6b6dae00b92cb06"
+  },
+  "icon:settings": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/icons@3.34.1/icons/outline/settings.svg",
+    "sha256": "3e1f110886f6c39b462fc8bca41af4a84b803add39751bb57825983c9660bd0f"
+  },
+  "icon:dashboard": {
+    "source": "https://cdn.jsdelivr.net/npm/@tabler/icons@3.34.1/icons/outline/dashboard.svg",
+    "sha256": "4c5ec1b102227b29481daeed09435beddfa51cc36ad52e90eb52e682b1ea19cc"
+  }
+}

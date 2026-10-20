@@ -1,0 +1,7 @@
+services:
+  angie:
+    image: apm-angie-extended:dev
+    build:
+      context: .
+      dockerfile: deploy/extended/Dockerfile
+      args: { BASE_IMAGE: apm-angie:dev }

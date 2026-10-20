@@ -1,0 +1,19 @@
+[Unit]
+Description=APM agent for the existing Angie server
+After=network.target angie.service
+Requires=angie.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/apm
+EnvironmentFile=/opt/apm/.env.existing
+User=root
+Group=10001
+UMask=0007
+ExecStartPre=/opt/apm/.venv/bin/apm bootstrap-agent
+ExecStart=/opt/apm/.venv/bin/apm agent
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

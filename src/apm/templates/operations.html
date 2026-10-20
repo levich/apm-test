@@ -1,0 +1,3 @@
+<div class="card"><div class="card-header"><h2 class="card-title">{{ t.operations }}</h2></div><div class="table-responsive"><table class="table table-vcenter card-table"><thead><tr><th>{{ t.name }}</th><th>{{ t.status }}</th><th>{{ t.error }}</th></tr></thead><tbody>
+{% for job in jobs %}<tr><td>{{ job.kind }}</td><td><span class="badge {{ 'bg-green-lt' if job.status=='succeeded' else 'bg-red-lt' if job.status=='failed' else 'bg-yellow-lt' }}">{{ job.status }}</span></td><td class="text-secondary">{{ job.error or '—' }}</td></tr>{% else %}<tr><td colspan="3" class="text-secondary">{{ t.empty }}</td></tr>{% endfor %}
+</tbody></table></div></div>

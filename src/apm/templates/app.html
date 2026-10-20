@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="{{ language }}" data-bs-theme="light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}"><meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
+  <title>{{ t.get(page, page) }} · {{ t.app }}</title>
+  <link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/vendor/tabler.min.css"><link rel="stylesheet" href="/static/app.css">
+  <script nonce="{{ request.state.nonce }}" id="apm-context" type="application/json">{{ {"page":page,"t":t,"role":user.role,"admin_kinds":admin_kinds,"language":language,"email":user.email,"letsencrypt":letsencrypt}|tojson }}</script>
+  <script defer src="/static/vendor/htmx.min.js"></script><script defer src="/static/vendor/tabler.min.js"></script><script defer src="/static/app.js"></script>
+</head>
+<body><div class="apm-layout">
+<aside class="apm-sidebar">
+  <a class="brand" href="/ui/dashboard"><img src="/static/favicon.svg" width="34" height="34" alt=""><span>Angie <strong>Proxy Manager</strong></span></a>
+  <div class="sidebar-label">WORKSPACE</div>
+  <nav aria-label="Main navigation">
+  {% for section in ["dashboard","proxy-hosts","redirect-hosts","streams","upstreams","sites"] %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#{{ 'dashboard' if section=='dashboard' else 'server' }}"></use></svg>{{ t[section] }}</a>{% endfor %}
+  <div class="sidebar-label">SECURITY</div>
+  {% for section in ["certificates","dns-profiles","access-lists","header-policies","tls-policies","auth-providers","client-cas","crowdsec-profiles","geo-policies","ech"] %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#shield"></use></svg>{{ t[section] }}</a>{% endfor %}
+  <div class="sidebar-label">SYSTEM</div>
+  {% for section in ["operations","logs","metrics","runtime","imports","security"] + (["users","audit"] if user.role=="admin" else []) %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#settings"></use></svg>{{ t[section] }}</a>{% endfor %}
+  </nav>
+  <div class="sidebar-foot"><span class="status-dot"></span> {{ version }}<br><small>{{ t.development }}</small></div>
+</aside>
+<main class="apm-main">
+  <header class="apm-topbar"><span class="text-secondary">CONTROL PLANE <span class="mx-2">/</span> {{ t.get(page,page) }}</span><div class="topbar-actions">
+    <button id="language-switch" class="btn btn-sm btn-ghost-secondary">{{ 'EN' if language=='ru' else 'RU' }}</button>
+    <button id="theme-switch" class="btn btn-sm btn-ghost-secondary" aria-label="Toggle theme">◐</button>
+    <span class="user-avatar">{{ user.email[:1]|upper }}</span><span class="user-info">{{ user.email }}<small>{{ user.role }}</small></span>
+    <button id="logout" class="btn btn-sm btn-outline-secondary">{{ t.logout }}</button>
+  </div></header>
+  <div class="apm-content">
+    <div class="page-header"><div><div class="subheader">ANGIE PROXY MANAGER</div><h1>{{ t.get(page,page) }}</h1></div><div class="page-actions">
+      <button id="refresh" class="btn">{{ t.refresh }}</button>
+      {% if page in kinds and user.role!='observer' and (user.role=='admin' or page not in admin_kinds) %}<button id="create" class="btn btn-primary">＋ {{ t.create }}</button>{% endif %}
+      {% if page=='users' and user.role=='admin' %}<button id="create-user" class="btn btn-primary">＋ {{ t.create }}</button>{% endif %}
+    </div></div>
+    <div id="notice" class="alert d-none" role="status"></div>
+    <div id="content" aria-live="polite"><div class="card"><div class="card-body text-secondary">{{ t.loading }}</div></div></div>
+    {% if page=='dashboard' %}<div class="mt-4" hx-get="/fragments/operations" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>{% endif %}
+  </div>
+  <footer>{{ t.development }} <a href="/api/docs">API</a></footer>
+</main></div>
+<dialog id="editor" class="apm-dialog"><form id="editor-form"><div class="dialog-head"><h2 id="editor-title"></h2><button type="button" id="editor-close" class="btn btn-ghost-secondary" aria-label="Close">×</button></div>
+<div class="dialog-body"><div id="editor-error" class="alert alert-danger d-none"></div><div id="editor-fields"></div></div>
+<div class="dialog-footer"><button type="button" id="editor-cancel" class="btn">{{ t.cancel }}</button><button id="editor-save" class="btn btn-primary" type="submit">{{ t.save }}</button></div></form></dialog>
+</body></html>

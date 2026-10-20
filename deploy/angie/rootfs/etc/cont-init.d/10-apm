@@ -1,0 +1,5 @@
+#!/command/with-contenv sh
+set -eu
+umask 0007
+apm pre-run
+apm bootstrap-agent

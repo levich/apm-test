@@ -1,0 +1,30 @@
+# Docker Desktop / local test: use together with compose.yaml.
+name: angie-proxy-manager-local
+x-local-data: &local-data
+  - local-data:/data
+x-local-environment: &local-environment
+  APM_BACKEND_URL: http://manager:8181
+services:
+  init:
+    volumes: *local-data
+    environment: *local-environment
+  manager:
+    volumes: *local-data
+    environment: *local-environment
+  worker:
+    volumes: *local-data
+    environment: *local-environment
+  angie:
+    network_mode: !reset null
+    networks: [control]
+    environment: *local-environment
+    ports:
+      - "127.0.0.1:81:81"
+      - "127.0.0.1:8088:80"
+      - "127.0.0.1:8443:443"
+      - "127.0.0.1:8443:443/udp"
+    volumes: *local-data
+    depends_on:
+      manager: { condition: service_healthy }
+volumes:
+  local-data: {}

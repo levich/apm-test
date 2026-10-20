@@ -1,0 +1,49 @@
+{
+  "runs": [
+    {
+      "binary": "Angie version: Angie/1.12.4",
+      "generation": 2,
+      "checks": [
+        "angie -t",
+        "atomic reload",
+        "HTTP",
+        "TLS",
+        "gRPC over HTTP/2",
+        "HTTP/3 over QUIC",
+        "TCP",
+        "UDP",
+        "invalid configuration preserves traffic"
+      ]
+    },
+    {
+      "binary": "Angie version: Angie/1.12.4",
+      "generation": 2,
+      "checks": [
+        "angie -t",
+        "atomic reload",
+        "HTTP",
+        "TLS",
+        "gRPC over HTTP/2",
+        "HTTP/3 over QUIC",
+        "TCP",
+        "UDP",
+        "invalid configuration preserves traffic"
+      ]
+    },
+    {
+      "binary": "Angie version: Angie/1.12.4",
+      "generation": 2,
+      "checks": [
+        "angie -t",
+        "atomic reload",
+        "HTTP",
+        "TLS",
+        "gRPC over HTTP/2",
+        "HTTP/3 over QUIC",
+        "TCP",
+        "UDP",
+        "invalid configuration preserves traffic"
+      ]
+    }
+  ]
+}

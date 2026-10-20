@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="{{ language }}" data-bs-theme="light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t.setup if setup else t.login }} · {{ t.app }}</title>
+  <link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/vendor/tabler.min.css">
+  <link rel="stylesheet" href="/static/app.css"><script defer src="/static/login.js"></script>
+</head>
+<body class="d-flex flex-column login-page">
+<div class="page page-center"><div class="container container-tight py-4">
+  <div class="text-center mb-4 brand"><img src="/static/favicon.svg" width="38" height="38" alt=""> <span>Angie <strong>Proxy Manager</strong></span></div>
+  <div class="card card-md"><div class="card-body">
+    <div class="subheader mb-2">CONTROL PLANE</div>
+    <h1 class="h2 mb-4">{{ t.setup if setup else t.login }}</h1>
+    <div id="login-error" class="alert alert-danger d-none" role="alert"></div>
+    <form id="login-form" data-setup="{{ 'true' if setup else 'false' }}">
+      {% if setup %}<p class="text-secondary">{{ t.setup_hint }}</p><label class="form-label" for="token">{{ t.token }}</label><input id="token" class="form-control mb-3" name="token" type="password" autocomplete="off" required>{% endif %}
+      {% if not oidc_only or setup %}
+      <label class="form-label" for="email">{{ t.email }}</label><input id="email" class="form-control mb-3" type="email" name="email" autocomplete="username" required>
+      <label class="form-label" for="password">{{ t.password }}</label><input id="password" class="form-control mb-4" type="password" name="password" autocomplete="{{ 'new-password' if setup else 'current-password' }}" {% if setup %}minlength="12"{% endif %} required>
+      <button class="btn btn-primary w-100" type="submit">{{ t.setup if setup else t.login }}</button>
+      {% endif %}
+      {% if oidc %}<a class="btn btn-outline-primary w-100 mt-3" href="/auth/oidc">{{ t.oidc }}</a>{% endif %}
+    </form>
+    <form id="mfa-form" class="d-none"><label class="form-label" for="code">{{ t.mfa }}</label><input class="form-control mb-3" id="code" name="code" autocomplete="one-time-code" required><button type="submit" class="btn btn-primary w-100">{{ t.mfa_verify }}</button></form>
+  </div></div>
+  <div class="text-center text-secondary mt-4 small">{{ t.development }}</div>
+  <div class="text-center mt-3"><button class="btn btn-link language" data-language="ru">Русский</button><span class="text-secondary">/</span><button class="btn btn-link language" data-language="en">English</button></div>
+</div></div>
+</body></html>

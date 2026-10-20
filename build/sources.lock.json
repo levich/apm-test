@@ -1,0 +1,70 @@
+{
+  "openssl-ech": {
+    "repository": "openssl/openssl",
+    "reference": "d01cd520e52ab8bcdad27496209a27022679d970",
+    "revision": "d01cd520e52ab8bcdad27496209a27022679d970",
+    "url": "https://codeload.github.com/openssl/openssl/tar.gz/d01cd520e52ab8bcdad27496209a27022679d970",
+    "sha256": "5d7583e27ca58e67f60cba81c3ca0d1d8d5198f25609d26bb40278520945b0d6"
+  },
+  "ndk": {
+    "repository": "vision5/ngx_devel_kit",
+    "reference": "v0.3.3",
+    "revision": "91e30eb05085e7f9762f130cbb883a0e753cf74d",
+    "url": "https://codeload.github.com/vision5/ngx_devel_kit/tar.gz/91e30eb05085e7f9762f130cbb883a0e753cf74d",
+    "sha256": "81ae8024e4e0315c9f476aa114cc309e7d616f4c764f79d4c58e3ab5801cb25e"
+  },
+  "lua": {
+    "repository": "openresty/lua-nginx-module",
+    "reference": "v0.10.29",
+    "revision": "a1ec138e98801400832fee6030120777bf9bb435",
+    "url": "https://codeload.github.com/openresty/lua-nginx-module/tar.gz/a1ec138e98801400832fee6030120777bf9bb435",
+    "sha256": "b1daadf95a63ff0fc67bf067d45da16560a6d3d4b4402bde81950073316e5c5e"
+  },
+  "stream-lua": {
+    "repository": "openresty/stream-lua-nginx-module",
+    "reference": "v0.0.16",
+    "revision": "4169f1ba16860e30403372693a85171bebf1994d",
+    "url": "https://codeload.github.com/openresty/stream-lua-nginx-module/tar.gz/4169f1ba16860e30403372693a85171bebf1994d",
+    "sha256": "8ef4749b36f36dc1b02395cfaae4326f179eb3e94da50be033528caee40fd00b"
+  },
+  "headers-more": {
+    "repository": "openresty/headers-more-nginx-module",
+    "reference": "v0.39",
+    "revision": "2b1debde426783b8f42246149d3638644a6347cb",
+    "url": "https://codeload.github.com/openresty/headers-more-nginx-module/tar.gz/2b1debde426783b8f42246149d3638644a6347cb",
+    "sha256": "eee7009e582dc46b86919dfa4a6e653f603d6dca0c17e0624ee594decc887fb9"
+  },
+  "brotli": {
+    "repository": "google/ngx_brotli",
+    "reference": "master",
+    "revision": "a71f9312c2deb28875acc7bacfdd5695a111aa53",
+    "url": "https://codeload.github.com/google/ngx_brotli/tar.gz/a71f9312c2deb28875acc7bacfdd5695a111aa53",
+    "sha256": "1d21be34f3b7b6d05a8142945e59b3a47665edcdfe0f3ee3d3dbef121f90c08c"
+  },
+  "zstd": {
+    "repository": "tokers/zstd-nginx-module",
+    "reference": "master",
+    "revision": "057a7d339af1111d04b5a9ac5ae9b0250d17cd94",
+    "url": "https://codeload.github.com/tokers/zstd-nginx-module/tar.gz/057a7d339af1111d04b5a9ac5ae9b0250d17cd94",
+    "sha256": "6f03d047cb5b2045d5622e37eb9ce4f67b9880214d5781e8656e4b8b33e25465"
+  },
+  "geoip2": {
+    "repository": "leev/ngx_http_geoip2_module",
+    "reference": "3.4",
+    "revision": "cbaa35461c62a99d2577e6bae3273492502d8769",
+    "url": "https://codeload.github.com/leev/ngx_http_geoip2_module/tar.gz/cbaa35461c62a99d2577e6bae3273492502d8769",
+    "sha256": "52b76bfe81c75a4decfbf526e030a5bb4887b5c209343162fa452526572018b7"
+  },
+  "fancyindex": {
+    "repository": "aperezdc/ngx-fancyindex",
+    "reference": "v0.5.2",
+    "revision": "6cdffdb0af493b7c21eedba2f09d8486579f3922",
+    "url": "https://codeload.github.com/aperezdc/ngx-fancyindex/tar.gz/6cdffdb0af493b7c21eedba2f09d8486579f3922",
+    "sha256": "3bac7df6fff2d89db231357757958e8247a333dc4b584727dd130838f5e3a005"
+  },
+  "angie": {
+    "url": "https://download.angie.software/files/angie-1.12.4.tar.gz",
+    "version": "1.12.4",
+    "sha256": "b236f152adb543fb6e4a94f271b873cdc0d48d570f86b1bd04435f85843f4527"
+  }
+}

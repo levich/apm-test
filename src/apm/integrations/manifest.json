@@ -1,0 +1,10 @@
+{
+  "crowdsec": {
+    "source": "https://codeload.github.com/crowdsecurity/lua-cs-bouncer/tar.gz/refs/tags/v1.0.19",
+    "sha256": "8d15e80886f08624d8435f82ffe7dca1309eb6104d146ae947619dc8c320d11d"
+  },
+  "resty-http": {
+    "source": "https://codeload.github.com/ledgetech/lua-resty-http/tar.gz/refs/tags/v0.17.1",
+    "sha256": "f52a0538b20a2d45025f318c18a138b78f6f88f07713dd0ed502183cb3d16f17"
+  }
+}

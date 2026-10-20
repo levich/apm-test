@@ -1,0 +1,16 @@
+services:
+  goaccess:
+    image: allinurl/goaccess:1.12@sha256:9e6dfd4abce94bd7c2907c1840b7b35f666587d56b24ffbb930b4782a87ea172
+    user: "10001:10001"
+    entrypoint: ["/bin/sh", "/apm/run.sh"]
+    restart: unless-stopped
+    read_only: true
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    tmpfs: [/tmp]
+    volumes:
+      - ./deploy/goaccess/run.sh:/apm/run.sh:ro
+      - ./data/logs:/logs:ro
+      - ./data/reports:/reports
+    depends_on: { init: { condition: service_completed_successfully } }

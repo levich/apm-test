@@ -1,0 +1,3 @@
+# Add inside the EXISTING stream {} block of APM_ANGIE_CONFIG,
+# or create one stream {} block if absent. Load the stream module if dynamic.
+include /srv/apm/current/stream.conf;

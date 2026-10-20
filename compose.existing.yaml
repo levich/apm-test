@@ -1,0 +1,69 @@
+# Standalone deployment: docker compose --env-file .env.existing -f compose.existing.yaml ...
+name: angie-proxy-manager
+x-common: &common
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+x-application: &application
+  <<: *common
+  image: apm-manager:dev
+  build: { context: ., dockerfile: Dockerfile }
+  env_file: .env.existing
+  environment:
+    APM_ANGIE_MODE: existing
+    APM_DATA_DIR: ${APM_DATA_DIR:?Set an absolute APM_DATA_DIR in .env.existing}
+  volumes:
+    - type: bind
+      source: ${APM_DATA_DIR:?Set an absolute APM_DATA_DIR in .env.existing}
+      target: ${APM_DATA_DIR:?Set an absolute APM_DATA_DIR in .env.existing}
+  networks: [control]
+services:
+  init:
+    <<: *application
+    restart: "no"
+    user: "0:0"
+    entrypoint: [python, -c]
+    command:
+      - |
+        import os
+        from apm.config import Settings
+        config = Settings()
+        config.prepare()
+        names = ("run", "revisions", "certificates", "acme", "webroot", "logs", "exports", "sites", "reports")
+        for path in [config.data_dir, *(config.data_dir / name for name in names)]:
+            if path.is_dir() and not path.is_symlink():
+                os.chown(path, 10001, 10001)
+                os.chmod(path, 0o2770)
+  manager:
+    <<: *application
+    command: [serve]
+    ports: ["127.0.0.1:8181:8181"]
+    depends_on: { init: { condition: service_completed_successfully } }
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8181/health/live')"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  worker:
+    <<: *application
+    command: [worker]
+    depends_on: { manager: { condition: service_healthy } }
+  docker-gateway:
+    <<: *common
+    profiles: [discovery]
+    image: apm-manager:dev
+    command: [gateway]
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs: [/tmp]
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [control]
+networks:
+  control: {}

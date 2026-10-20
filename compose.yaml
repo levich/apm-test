@@ -1,0 +1,86 @@
+name: angie-proxy-manager
+x-common: &common
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+x-application: &application
+  <<: *common
+  image: apm-manager:dev
+  build: { context: ., dockerfile: Dockerfile }
+  env_file: .env
+  environment:
+    APM_DATA_DIR: /data
+  volumes: ["./data:/data"]
+  networks: [control]
+services:
+  init:
+    <<: *application
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["sh", "-ec"]
+    command:
+      [
+        "mkdir -p /data/run /data/logs /data/reports; chown 10001:10001 /data /data/run /data/logs /data/reports; chmod 2770 /data /data/run /data/logs /data/reports",
+      ]
+  manager:
+    <<: *application
+    command: ["serve"]
+    ports: ["127.0.0.1:8181:8181"]
+    depends_on: { init: { condition: service_completed_successfully } }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8181/health/live')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  worker:
+    <<: *application
+    command: ["worker"]
+    depends_on:
+      manager: { condition: service_healthy }
+      docker-gateway: { condition: service_started }
+      angie: { condition: service_healthy }
+  angie:
+    <<: *common
+    image: apm-angie:dev
+    build:
+      context: .
+      dockerfile: deploy/angie/Dockerfile
+      args:
+        APP_IMAGE: apm-manager:dev
+        ANGIE_IMAGE: ${APM_ANGIE_IMAGE:-docker.angie.software/angie:1.12.4-debian}
+    network_mode: host
+    env_file: .env
+    environment: { APM_DATA_DIR: /data }
+    volumes: ["./data:/data"]
+    depends_on: { init: { condition: service_completed_successfully } }
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import httpx; from apm.config import Settings; c=Settings(); client=httpx.Client(transport=httpx.HTTPTransport(uds=str(c.socket)), base_url='http://agent', timeout=3); assert client.get('/status').json()['available']"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+  docker-gateway:
+    <<: *common
+    image: apm-manager:dev
+    command: ["gateway"]
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs: [/tmp]
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [control]
+networks:
+  control: {}

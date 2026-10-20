@@ -1,0 +1,39 @@
+{
+  "uv": {
+    "tag": "ghcr.io/astral-sh/uv:0.12.3",
+    "digest": "sha256:2d890623d310b57771ce840f0da5eed5fc6d657da05ffaa45d82797b53fa3abc",
+    "reference": "ghcr.io/astral-sh/uv:0.12.3@sha256:2d890623d310b57771ce840f0da5eed5fc6d657da05ffaa45d82797b53fa3abc",
+    "platforms": {
+      "amd64": "sha256:dfd1e6972e100ca2fbf1f391effc3dd4aa57f319bf03c3e321e0a3f3341ed5af",
+      "arm64": "sha256:deec8b619a357104bc3d6916ab399939850224651c0bd6f256bb411a2af453c0"
+    }
+  },
+  "goaccess": {
+    "tag": "allinurl/goaccess:1.12",
+    "digest": "sha256:9e6dfd4abce94bd7c2907c1840b7b35f666587d56b24ffbb930b4782a87ea172",
+    "reference": "allinurl/goaccess:1.12@sha256:9e6dfd4abce94bd7c2907c1840b7b35f666587d56b24ffbb930b4782a87ea172",
+    "platforms": {
+      "amd64": "sha256:ce8fc587382dc85f4757262156928c4c76edcbf780c58603291e3a6080b4fcdc",
+      "arm64": "sha256:faedaedb59adc76d030ee1cb6592a688dd2879b61a548b7fb27f3ac856780374"
+    }
+  },
+  "python": {
+    "tag": "python:3.13.15-slim-trixie",
+    "digest": "sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b",
+    "reference": "python:3.13.15-slim-trixie@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b",
+    "platforms": {
+      "amd64": "sha256:37134a49d21d2120e4c4d73bb76f8a4ab9aef31f096f7ec2ead48c2feead4332",
+      "arm": "sha256:ff243e5fa18c87535f597e8d8cb7304e07e089541731d2089da07ec889e38bd3",
+      "arm64": "sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f",
+      "386": "sha256:ca464a56ecc51a2adb560768a62b76fe8dfe3f1e56dc1f80ca77e7efe036c023",
+      "ppc64le": "sha256:228d1d5a643baed5066103f95b1d6553bbf6498ccd589ccb44b31501ba75b2b7",
+      "riscv64": "sha256:39d25a9d2cb8c41b51aabfc0fa525c42f195a81c625e83108c0b97088161a5bd",
+      "s390x": "sha256:9d8ca8e0069e7f741d3b6662369c41e1027f0cfb08b9603e614596f3dfce222d"
+    }
+  },
+  "angie": {
+    "tag": "docker.angie.software/angie:1.12.4-debian",
+    "verified": false,
+    "error": "URLError"
+  }
+}

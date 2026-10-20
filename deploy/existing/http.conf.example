@@ -1,0 +1,24 @@
+# Add inside the EXISTING http {} block of APM_ANGIE_CONFIG.
+# Keep these includes directly in the main file, one directive per line.
+include /srv/apm/current/http.conf;
+
+# Reuse an existing local Angie API endpoint instead if one is already configured.
+server {
+    listen 127.0.0.1:18081;
+    location /status/ { api /status/; }
+}
+
+server {
+    listen 443 ssl;
+    server_name apm.example.com;
+    # Use an existing certificate valid for the panel's domain.
+    ssl_certificate /etc/angie/ssl/apm.fullchain.pem;
+    ssl_certificate_key /etc/angie/ssl/apm.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8181;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+    }
+}

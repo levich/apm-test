@@ -1,0 +1,14 @@
+{
+  "noarch": {
+    "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.0.2/s6-overlay-noarch.tar.xz",
+    "sha256": "6dbcde158a3e78b9bb141d7bcb5ccb421e563523babbe2c64470e76f4fd02dae"
+  },
+  "x86_64": {
+    "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.0.2/s6-overlay-x86_64.tar.xz",
+    "sha256": "59289456ab1761e277bd456a95e737c06b03ede99158beb24f12b165a904f478"
+  },
+  "aarch64": {
+    "url": "https://github.com/just-containers/s6-overlay/releases/download/v3.2.0.2/s6-overlay-aarch64.tar.xz",
+    "sha256": "8b22a2eaca4bf0b27a43d36e65c89d2701738f628d1abd0cea5569619f66f785"
+  }
+}
