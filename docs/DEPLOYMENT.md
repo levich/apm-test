@@ -1046,3 +1046,90 @@ dc up -d --no-build --wait --wait-timeout 120
 `dc down` удаляет контейнеры и сеть выбранного проекта. Bind mount A/B и named volume C при обычном `down` сохраняются. `down --volumes` удаляет именованные тома, в том числе данные C; не используйте эту опцию для обычной остановки. Смена имени Compose-проекта в C создаёт другое хранилище и может выглядеть как потеря данных.
 
 В B остановка Compose не останавливает системный Angie: последний применённый конфиг продолжает обслуживать сайты. Чтобы полностью отключить интеграцию APM, сначала остановите worker, удалите две строки APM include и виртуальный хост панели из основной конфигурации, выполните `angie -t` и reload, затем остановите агент и Compose. Сохраните данные и архивы.
+
+## 13. Выпуск сертификата для APM при установке с существущем Angie
+
+Для этого выпусти отдельный сертификат **на хосте, где работает Angie**, через Certbot. Затем укажи его файлы в [шаблоне панели](/Users/levich/Documents/work/APM/deploy/existing/http.conf.example:15).
+
+Ниже замени `apm.example.com` на домен панели, а `admin@example.com` — на свой email.
+
+1. **Подготовь домен.**
+
+   DNS-запись `A` должна указывать на сервер. Если есть `AAAA`, IPv6 тоже должен вести на него. Для проверки HTTP-01 нужен доступ из интернета к порту **80**, для панели — **443**. [Условия проверки Let’s Encrypt](https://letsencrypt.org/docs/challenge-types/#http-01-challenge).
+
+2. **Установи Certbot и создай каталог проверки:**
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y certbot
+   sudo install -d -m 755 /var/www/letsencrypt
+   ```
+
+3. **Добавь HTTP-блок в существующий `http {}` Angie:**
+
+   ```nginx
+   server {
+       listen 80;
+       server_name apm.example.com;
+
+       location ^~ /.well-known/acme-challenge/ {
+           root /var/www/letsencrypt;
+           default_type text/plain;
+           try_files $uri =404;
+       }
+
+       location / {
+           return 404;
+       }
+   }
+   ```
+
+   HTTPS-блок панели добавляй после выпуска сертификата: иначе проверка конфигурации завершится ошибкой из-за отсутствующих PEM-файлов.
+
+   Проверь конфигурацию и выполни reload:
+
+   ```bash
+   sudo /usr/sbin/angie -p /etc/angie -t -c /etc/angie/angie.conf \
+     && sudo systemctl reload angie
+   ```
+
+4. **Выпусти сертификат:**
+
+   ```bash
+   sudo certbot certonly \
+     --webroot -w /var/www/letsencrypt \
+     --cert-name apm.example.com \
+     -d apm.example.com \
+     --email admin@example.com \
+     --agree-tos \
+     --deploy-hook '/usr/sbin/angie -p /etc/angie -t -c /etc/angie/angie.conf && systemctl reload angie'
+   ```
+
+   Certbot разместит проверочный файл в webroot. Сохранённый `deploy-hook` будет проверять и перечитывать конфигурацию Angie после успешного продления. [Документация Certbot](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot).
+
+5. **Укажи полученные файлы в HTTPS-блоке панели:**
+
+   ```nginx
+   server_name apm.example.com;
+
+   ssl_certificate /etc/letsencrypt/live/apm.example.com/fullchain.pem;
+   ssl_certificate_key /etc/letsencrypt/live/apm.example.com/privkey.pem;
+   ```
+
+   Используй эти пути напрямую. В `.env.existing` задай:
+
+   ```dotenv
+   APM_PUBLIC_URL=https://apm.example.com
+   APM_COOKIE_SECURE=true
+   ```
+
+   После добавления HTTPS-блока повтори проверку конфигурации и reload из шага 3.
+
+6. **Включи автоматическое продление и проверь его:**
+
+   ```bash
+   sudo systemctl enable --now certbot.timer
+   sudo certbot renew --cert-name apm.example.com --dry-run --run-deploy-hooks
+   ```
+
+   HTTP-блок и каталог `/var/www/letsencrypt` сохрани для следующих продлений. Таймер входит в [Debian-пакет Certbot](https://packages.debian.org/trixie/all/certbot/filelist).
