@@ -1,6 +1,14 @@
 """Localized explanations of resource settings, including page-specific behavior."""
 
 PAGES_EN = {
+    "access-lists": {
+        "rules": "IP rules are evaluated from top to bottom; the first match wins. Use IPv4, IPv6, CIDR (10.0.0.0/8) or all. When rules exist without an all entry, APM appends deny all. With no rules there is no IP restriction.",
+        "action": "allow permits a matching address and deny rejects it. The first matching rule determines the IP decision. Order specific exceptions before broader networks or all.",
+        "address": "An IP, a CIDR network such as 192.168.1.0/24 or 2001:db8::/32, or all for every address. Host names are not supported. The client IP is determined by the trusted proxy configuration.",
+        "users": "Names of Basic Auth users. New names require passwords in Credentials. Passwords are write-only; adding a name here alone does not create a password. Empty users and rules add no restriction.",
+        "satisfy": "all requires both the IP rules and Basic Auth checks to pass; any permits access when either check passes. Only configured checks participate. When multiple lists are linked, the first list supplies satisfy.",
+        "pass_auth": "Forward the client's Authorization header to the backend. Disabled by default: APM clears it. Enable only if the application needs these credentials. With multiple lists, the first list supplies this setting.",
+    },
     "sites": {
         "name": "A name for finding the site in the panel, for example Company website. Requests are matched by Domain names. This name does not set the directory containing the site's files.",
         "enabled": "Include this site in Angie's configuration after saving and a successful apply. Disabling removes the site's configuration but keeps its settings and files; it does not stop a separate PHP-FPM service.",
@@ -14,6 +22,14 @@ PAGES_EN = {
 }
 
 PAGES_RU = {
+    "access-lists": {
+        "rules": "IP-правила проверяются сверху вниз до первого совпадения. Допустимы IPv4, IPv6, CIDR (10.0.0.0/8) и all. Если правила есть, но нет записи all, APM добавляет deny all. Пустой список не ограничивает IP.",
+        "action": "allow разрешает совпавший адрес, deny запрещает. Решение задаёт первое совпавшее правило. Узкие исключения размещайте выше широких сетей и all.",
+        "address": "IP, сеть CIDR, например 192.168.1.0/24 или 2001:db8::/32, либо all для всех адресов. Доменные имена не поддерживаются. IP клиента зависит от настройки доверенных прокси.",
+        "users": "Имена пользователей Basic Auth. Для новых имён задайте пароли в «Учётных данных». Сохранённые пароли не показываются; добавление одного имени не создаёт пароль. Пустые пользователи и правила не ограничивают доступ.",
+        "satisfy": "all требует прохождения и IP-проверки, и Basic Auth; any разрешает доступ при успешной любой из проверок. Участвуют только настроенные проверки. При нескольких списках satisfy берётся из первого.",
+        "pass_auth": "Передавать заголовок Authorization клиента приложению. По умолчанию выключено: APM очищает заголовок. Включайте, если приложению нужны эти данные. При нескольких списках значение берётся из первого.",
+    },
     "sites": {
         "name": "Название для поиска сайта в панели, например «Сайт компании». Входящие запросы сопоставляются с полем «Доменные имена». Название не задаёт каталог с файлами сайта.",
         "enabled": "Включает сайт в конфигурацию Angie после сохранения и успешного применения. Выключение убирает конфигурацию сайта, сохраняя его настройки и файлы; отдельный сервис PHP-FPM при этом продолжает работать.",

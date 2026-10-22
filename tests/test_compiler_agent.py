@@ -8,16 +8,20 @@ from apm.compiler import CompileError, Compiler, q
 from apm.schemas import Access, Route, Stream
 
 
-def resource(kind, data, object_id=None):
-    return {"id": object_id or str(uuid.uuid4()), "kind": kind, "data": data, "enabled": True}
+def resource(kind, data, object_id=None, name=None):
+    return {"id": object_id or str(uuid.uuid4()), "kind": kind, "data": data, "enabled": True,
+            **({"name": name} if name is not None else {})}
+
+
+def bundle_text(bundle):
+    return "\n".join([bundle.config, *bundle.files.values()])
 
 
 def test_tls_pending_never_exposes_plaintext_backend(config):
     data = Route(domains=["example.com"], tls="http", acme_terms_agreed=True).model_dump()
-    text = (
+    text = bundle_text(
         Compiler(config, {}, config.data_dir / "revisions/test")
         .compile([resource("proxy-hosts", data)])
-        .config
     )
     assert "location / { return 503; }" in text
     assert 'proxy_pass "http://127.0.0.1:8080' not in text
@@ -33,8 +37,8 @@ def test_acl_preserves_order_and_hashes(config):
     result = Compiler(
         config, {}, config.data_dir / "revisions/test", lambda _: {"user": "$6$abc$hash"}
     ).compile([resource("access-lists", access, acl_id), resource("proxy-hosts", route)])
-    assert "allow 10.0.0.0/8;\ndeny all;" in result.config
-    assert "xn--e1afmkfd.xn--p1ai" in result.config
+    assert "allow 10.0.0.0/8;\ndeny all;" in bundle_text(result)
+    assert "xn--e1afmkfd.xn--p1ai" in bundle_text(result)
     assert any("user:$6$abc$hash" in value for value in result.files.values())
 
 
@@ -82,10 +86,9 @@ def test_public_location_is_an_explicit_exception(config):
     route = Route(
         domains=["example.com"], access_ids=[acl_id], locations=[{"path": "/public", "access_mode": "public"}]
     ).model_dump()
-    text = (
+    text = bundle_text(
         Compiler(config, {}, config.data_dir)
         .compile([resource("access-lists", access, acl_id), resource("proxy-hosts", route)])
-        .config
     )
     public = text.split("location /public {", 1)[1].split("}", 1)[0]
     assert "deny all" not in public
@@ -114,3 +117,50 @@ def test_failed_reload_restores_previous_generation(config, monkeypatch):
     assert attempts == [str(candidate.revision_id), str(old.revision_id)]
     assert agent.current() == str(old.revision_id)
     assert not (config.data_dir / "run/apply-journal.json").exists()
+
+
+@pytest.mark.parametrize('mode', ['managed', 'existing'])
+def test_resource_fragments_names_context_order_and_rename(config, mode):
+    from apm.schemas import Redirect, Site, Upstream
+
+    config.angie_mode = mode
+    objects = [
+        resource('proxy-hosts', Route(domains=['example.com'], upstream_id='pool').model_dump(), 'proxy', 'test'),
+        resource('redirect-hosts', Redirect(domains=['redirect.example.com'], target='https://example.com').model_dump(), 'redirect', 'test'),
+        resource('sites', Site(domains=['site.example.com'], root_id='test').model_dump(), 'site', 'test'),
+        resource('streams', Stream(listen_port=19090, host='127.0.0.1', port=8080, upstream_id='pool').model_dump(), 'tcp', 'test'),
+        resource('streams', Stream(listen_port=19091, host='127.0.0.1', port=8080, upstream_id='pool').model_dump(), 'tcp2', 'another'),
+        resource('upstreams', Upstream(peers=[{'host': '127.0.0.1'}]).model_dump(), 'pool', 'pool'),
+    ]
+    first = Compiler(config, {}, config.data_dir / 'revisions/one').compile(objects)
+    assert {'http/test.proxy.conf', 'http/test.redirect.conf', 'http/test.site.conf',
+            'stream/test.stream.conf', 'http/pool.upstream.conf', 'stream/pool.upstream.conf'} <= first.files.keys()
+    main = first.files['http.conf'] if mode == 'existing' else first.config
+    assert main.index('pool.upstream.conf') < main.index('test.proxy.conf')
+    streams = first.files['stream.conf'] if mode == 'existing' else first.config
+    assert streams.count('stream/pool.upstream.conf') == 1
+    assert 'server_name example.com;' in first.files['http/test.proxy.conf']
+    objects[0]['name'] = 'renamed'
+    second = Compiler(config, {}, config.data_dir / 'revisions/two').compile(objects)
+    assert 'http/renamed.proxy.conf' in second.files
+    assert 'http/test.proxy.conf' not in second.files
+    assert 'http/test.proxy.conf' in first.files
+    second = Compiler(config, {}, config.data_dir / 'revisions/three').compile(objects[1:])
+    assert 'http/renamed.proxy.conf' not in second.files
+
+
+def test_fragment_names_are_safe_and_deterministic_on_collisions(config):
+    import re
+
+    route = Route(domains=['example.com']).model_dump()
+    objects = [resource('proxy-hosts', route, name='../../Тест / host', object_id='one'),
+               resource('proxy-hosts', route, name='.. Тест / host', object_id='two'),
+               resource('proxy-hosts', route, name='💡', object_id='three'),
+               resource('proxy-hosts', route, name='pool\n"; } /host', object_id='four')]
+    one = Compiler(config, {}, config.data_dir).compile(objects)
+    two = Compiler(config, {}, config.data_dir).compile(list(reversed(objects)))
+    assert one.files == two.files
+    assert len(one.files) == 4
+    for name in one.files:
+        assert re.fullmatch(r'http/[a-z0-9_-]+\.proxy\.conf', name)
+    assert len([name for name in one.files if name.startswith('http/test-host-')]) == 2

@@ -3,7 +3,12 @@
 import argparse
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
+from sqlalchemy import select
+
+from apm.agent import bootstrap_certificate
+from apm.config import Settings
+from apm.db import Database, Job
 
 
 def main():
@@ -78,6 +83,9 @@ def main():
         page.locator('#editor button[type="submit"]').click()
         page.wait_for_selector("dialog[open]", state="hidden")
         page.get_by_text("Browser route", exact=True).wait_for()
+        route_link = page.get_by_role("link", name="Browser route", exact=True)
+        assert route_link.get_attribute("href") == "http://browser.example.com/"
+        assert page.locator('[data-health-status="unknown"]').count() == 1
         page.screenshot(path=str(args.output / "hosts.png"), full_page=True)
         page.get_by_text("Изменить", exact=True).first.click()
         page.wait_for_selector("dialog[open]")
@@ -285,10 +293,70 @@ def main():
         assert "proxy host" not in certificate_help.inner_text()
         page.keyboard.press("Escape")
         page.locator("#editor-cancel").click()
+        # The server has no worker: queued requests must disable manual reissuance.
+        page.goto(args.url + "/ui/certificates")
+        page.locator('[data-action="renew"]').first.wait_for()
+        assert page.locator('[data-action="renew"]').first.is_disabled()
+        fixture_config = Settings(_env_file=None, data_dir=args.data)
+        fixture_db = Database(fixture_config)
+        with fixture_db.session() as session:
+            for job in session.scalars(select(Job).where(Job.kind == "certificate.issue")):
+                job.status = "succeeded"
+        page.locator("#refresh").click()
+        expect(page.locator('[data-action="renew"]').first).to_be_enabled()
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/renew")) as renewal:
+            page.locator('[data-action="renew"]').first.click()
+        assert renewal.value.status == 202
+        assert renewal.value.json()["operation_id"]
+        expect(page.locator('[data-action="renew"]').first).to_be_disabled()
+        with fixture_db.session() as session:
+            forced = [job for job in session.scalars(select(Job).where(Job.kind == "certificate.issue"))
+                      if job.payload.get("force")]
+            assert len(forced) == 1
+        page.screenshot(path=str(args.output / "certificates.png"), full_page=True)
+        # Upload actual local PEM material and check visible validity dates.
+        bootstrap_certificate(fixture_config)
+        created = page.request.post(args.url + "/api/v1/resources/certificates",
+            headers={"X-CSRF-Token": csrf},
+            data={"name": "Uploaded certificate", "data": {"mode": "custom", "domains": ["localhost"]}})
+        assert created.status == 201
+        page.locator("#refresh").click()
+        cert_row = page.locator("tr").filter(has=page.get_by_text("Uploaded certificate", exact=True))
+        cert_row.get_by_role("button", name="Upload", exact=True).click()
+        page.locator('#editor input[type="file"]').nth(0).set_input_files(str(args.data / "bootstrap/fullchain.pem"))
+        page.locator('#editor input[type="file"]').nth(1).set_input_files(str(args.data / "bootstrap/privkey.pem"))
+        page.locator("#editor-save").click()
+        page.wait_for_selector("dialog[open]", state="hidden")
+        cert_row.locator('[data-certificate-status="valid"]').wait_for()
+        assert "Valid until" in cert_row.inner_text()
+        assert cert_row.locator('[data-action="renew"]').count() == 0
+        page.screenshot(path=str(args.output / "certificates.png"), full_page=True)
+        page.goto(args.url + "/ui/operations")
+        page.get_by_text("Reissue certificate", exact=False).first.wait_for()
+        assert "waiting for an available worker" in page.locator("#content").inner_text()
+        page.screenshot(path=str(args.output / "operations.png"), full_page=True)
+        page.goto(args.url + "/ui/access-lists")
+        page.locator("#create").click()
+        page.locator('[data-field="satisfy"] > .field-help-button').click()
+        assert "both the IP rules" in page.locator('[data-field="satisfy"] > .field-help-popup').inner_text()
+        assert "replaces the entire set" in page.locator("#editor-fields").inner_text()
+        page.keyboard.press("Escape")
+        page.locator("#editor-cancel").click()
+        page.goto(args.url + "/ui/documentation/access-lists")
+        page.locator(".guide-article #satisfy").wait_for()
+        assert "<!-- setting:" not in page.locator(".guide-article").inner_text()
+        page.screenshot(path=str(args.output / "documentation-en.png"), full_page=True)
+        page.locator("#language-switch").click()
+        page.locator(".guide-article #satisfy").wait_for()
+        assert "Пустое поле" in page.locator(".guide-article").inner_text()
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=str(args.output / "documentation-mobile.png"), full_page=True)
+        fixture_db.engine.dispose()
         assert not errors, errors
         assert not network, network
         print(
-            "Browser checks passed: create/edit proxy hosts and static/PHP sites, locations, HTTP/DNS certificates, parameter help, Escape/focus, no checkbox or form side effects, mobile bounds, dark theme, RU/EN; no JS/HTTP errors"
+            "Browser checks passed: proxy links/availability, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
         )
         browser.close()
 

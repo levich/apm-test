@@ -17,7 +17,7 @@
   <div class="sidebar-label">SECURITY</div>
   {% for section in ["certificates","dns-profiles","access-lists","header-policies","tls-policies","auth-providers","client-cas","crowdsec-profiles","geo-policies","ech"] %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#shield"></use></svg>{{ t[section] }}</a>{% endfor %}
   <div class="sidebar-label">SYSTEM</div>
-  {% for section in ["operations","logs","metrics","runtime","imports","security"] + (["users","audit"] if user.role=="admin" else []) %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#settings"></use></svg>{{ t[section] }}</a>{% endfor %}
+  {% for section in ["operations","logs","metrics","runtime","imports","security","documentation"] + (["users","audit"] if user.role=="admin" else []) %}<a class="nav-item {{ 'active' if page==section }}" href="/ui/{{ section }}"><svg class="icon"><use href="/static/vendor/icons.svg#settings"></use></svg>{{ t[section] }}</a>{% endfor %}
   </nav>
   <div class="sidebar-foot"><span class="status-dot"></span> {{ version }}<br><small>{{ t.development }}</small></div>
 </aside>
@@ -35,7 +35,7 @@
       {% if page=='users' and user.role=='admin' %}<button id="create-user" class="btn btn-primary">＋ {{ t.create }}</button>{% endif %}
     </div></div>
     <div id="notice" class="alert d-none" role="status"></div>
-    <div id="content" aria-live="polite"><div class="card"><div class="card-body text-secondary">{{ t.loading }}</div></div></div>
+    <div id="content" aria-live="polite">{% if page=='documentation' %}{% include 'documentation.html' %}{% else %}<div class="card"><div class="card-body text-secondary">{{ t.loading }}</div></div>{% endif %}</div>
     {% if page=='dashboard' %}<div class="mt-4" hx-get="/fragments/operations" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>{% endif %}
   </div>
   <footer>{{ t.development }} <a href="/api/docs">API</a></footer>

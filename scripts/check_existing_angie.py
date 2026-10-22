@@ -117,11 +117,11 @@ def main():
                         ),
                     ]
                 )
-                bundle.files["http.conf"] = (
-                    bundle.files["http.conf"]
+                bundle.files = {name: (
+                    contents
                     .replace("listen 80", f"listen {http_port}")
                     .replace("listen [::]:80", f"listen [::]:{http_port}")
-                )
+                ) if name.endswith(".conf") else contents for name, contents in bundle.files.items()}
                 return Deployment(revision_id=revision, configuration=bundle.config, files=bundle.files)
 
             def check_traffic():
@@ -152,7 +152,8 @@ def main():
                 else:
                     raise AssertionError("Invalid configuration was accepted")
                 assert agent.current() == previous
-                assert agent.generation() == result["generation"]
+                actual = agent.generation()
+                assert actual == result["generation"], (invalid_legacy, actual, result)
                 check_traffic()
             assert config.root_config.read_text() == original
             assert not list(root.glob(".apm-validate-*"))

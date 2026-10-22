@@ -708,3 +708,20 @@ html[data-bs-theme="dark"] .nav-item:hover {
 .page-header > div:first-child {
   min-width: 0;
 }
+
+.resource-subtitle { white-space: normal; overflow-wrap: anywhere; }
+.route-details, .operation-technical { margin-top: 6px; max-width: 480px; white-space: normal; overflow-wrap: anywhere; }
+.route-details summary, .operation-technical summary { cursor: pointer; color: var(--tblr-secondary); font-size: .8rem; }
+[data-health-status], [data-certificate-status] { min-width: 150px; }
+.guide-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 20px; align-items: start; }
+.guide-nav { max-height: calc(100vh - 160px); overflow: auto; position: sticky; top: 20px; }
+.guide-article { min-width: 0; overflow-wrap: anywhere; }
+.guide-article h2 { margin-top: 32px; }
+.guide-article h3 { margin-top: 24px; scroll-margin-top: 20px; }
+.guide-article pre { overflow: auto; padding: 14px; background: var(--tblr-bg-surface-secondary); }
+.guide-article table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin-bottom: 16px; }
+.guide-article td, .guide-article th { border: 1px solid var(--tblr-border-color); padding: 8px; }
+@media (max-width: 900px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); }
+  .guide-nav { position: static; max-height: 210px; }
+}

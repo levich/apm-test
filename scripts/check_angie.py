@@ -175,15 +175,19 @@ def main():
             revision = uuid.uuid4()
             bundle = Compiler(config, caps, root / "revisions" / str(revision)).compile(objects)
             # The production configuration still uses 80/443 and the packaged mime types.
-            text = (
-                bundle.config.replace("user angie apm;", "")
-                .replace("listen 80", "listen 18080")
-                .replace("listen [::]:80", "listen [::]:18080")
-            )
-            text = text.replace("listen 443", "listen 18443").replace("listen [::]:443", "listen [::]:18443")
-            text = text.replace("/etc/angie/mime.types", str(args.conf_dir / "mime.types"))
-            text = text.replace("/etc/angie/fastcgi_params", str(args.conf_dir / "fastcgi_params"))
-            return Deployment(revision_id=revision, configuration=text, files=bundle.files)
+            def adapt(source):
+                return (
+                    source.replace("user angie apm;", "")
+                    .replace("listen 80", "listen 18080")
+                    .replace("listen [::]:80", "listen [::]:18080")
+                    .replace("listen 443", "listen 18443")
+                    .replace("listen [::]:443", "listen [::]:18443")
+                    .replace("/etc/angie/mime.types", str(args.conf_dir / "mime.types"))
+                    .replace("/etc/angie/fastcgi_params", str(args.conf_dir / "fastcgi_params"))
+                )
+            return Deployment(revision_id=revision, configuration=adapt(bundle.config),
+                              files={name: adapt(value) if name.endswith(".conf") else value
+                                     for name, value in bundle.files.items()})
 
         initial = deployment([])
         agent.stage(initial)

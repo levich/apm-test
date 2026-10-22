@@ -288,5 +288,51 @@ RU = {
 }
 
 
+EN.update({
+    "reason_no_peers": "No enabled backend members",
+    "reason_invalid_target": "Invalid backend check settings",
+    "documentation": "Documentation", "read_documentation": "Read the guide",
+    "technical_details": "Technical details", "renew": "Reissue", "validity": "Validity",
+    "availability": "Backend availability", "destination": "Forward to", "issuance": "Issuance",
+    "valid_from": "Valid from", "valid_until": "Valid until", "days_remaining": "Days remaining",
+    "checked_at": "Checked", "wildcard_link": "Open a specific subdomain of this wildcard host.",
+    "state_up": "Available", "state_partial": "Partially available", "state_down": "Unavailable",
+    "state_unknown": "No recent data", "state_disabled": "Disabled", "state_enabled": "Enabled",
+    "state_pending": "Queued", "state_running": "Running", "state_succeeded": "Completed",
+    "state_failed": "Failed", "state_ready": "Issued", "state_error": "Issuance failed",
+    "cert_valid": "Valid", "cert_expiring": "Expires within 30 days", "cert_expired": "Expired",
+    "cert_missing": "Not installed", "cert_disabled": "Disabled", "cert_key_mismatch": "Key mismatch",
+    "cert_not_yet_valid": "Not valid yet", "cert_domain_mismatch": "Domain mismatch",
+    "cert_invalid_files": "Invalid or missing PEM files", "ssl_waiting": "HTTPS configured; certificate required",
+    "reason_http_response": "HTTP response", "reason_http_error": "HTTP server error",
+    "reason_tls_connected": "TLS connection", "reason_tcp_connected": "TCP connection",
+    "reason_tls_error": "TLS verification or handshake failed", "reason_timeout": "Connection timed out",
+    "reason_dns_error": "DNS lookup failed", "reason_connection_error": "Connection or response failed",
+    "basic_credentials_hint": "One username=password per line. Leave empty to keep current passwords. Filling this field replaces the entire set of users and passwords; existing passwords cannot be displayed.",
+})
+RU.update({
+    "reason_no_peers": "Нет включённых серверов backend",
+    "reason_invalid_target": "Некорректные параметры проверки backend",
+    "documentation": "Документация", "read_documentation": "Открыть руководство",
+    "technical_details": "Технические сведения", "renew": "Перевыпустить", "validity": "Срок действия",
+    "availability": "Доступность backend", "destination": "Куда направляется", "issuance": "Выпуск",
+    "valid_from": "Действует с", "valid_until": "Действует до", "days_remaining": "Осталось дней",
+    "checked_at": "Проверено", "wildcard_link": "Для открытия wildcard-хоста нужен конкретный поддомен.",
+    "state_up": "Доступен", "state_partial": "Частично доступен", "state_down": "Недоступен",
+    "state_unknown": "Нет свежих данных", "state_disabled": "Выключен", "state_enabled": "Включён",
+    "state_pending": "В очереди", "state_running": "Выполняется", "state_succeeded": "Завершено",
+    "state_failed": "Ошибка", "state_ready": "Выпущен", "state_error": "Ошибка выпуска",
+    "cert_valid": "Корректен", "cert_expiring": "Истекает в течение 30 дней", "cert_expired": "Истёк",
+    "cert_missing": "Не установлен", "cert_disabled": "Выключен", "cert_key_mismatch": "Ключ не соответствует",
+    "cert_not_yet_valid": "Ещё не действует", "cert_domain_mismatch": "Не покрывает домены",
+    "cert_invalid_files": "Файлы PEM отсутствуют или повреждены", "ssl_waiting": "HTTPS настроен; нужен сертификат",
+    "reason_http_response": "Ответ HTTP", "reason_http_error": "Ошибка HTTP-сервера",
+    "reason_tls_connected": "Соединение TLS", "reason_tcp_connected": "Соединение TCP",
+    "reason_tls_error": "Ошибка проверки или соединения TLS", "reason_timeout": "Истёк тайм-аут подключения",
+    "reason_dns_error": "Ошибка разрешения DNS", "reason_connection_error": "Ошибка подключения или ответа",
+    "basic_credentials_hint": "По одному username=password на строке. Пустое поле сохраняет текущие пароли. Заполненное поле заменяет весь набор пользователей и паролей; существующие пароли не отображаются.",
+})
+
+
 def dictionary(language):
     return RU if language == "ru" else EN

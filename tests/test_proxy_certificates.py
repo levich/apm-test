@@ -39,7 +39,8 @@ def test_inline_certificate_is_linked_and_queued_after_apply(admin, config, mode
         assert certificate.data["server"] == config.acme_server
         assert certificate.data["status"] == "pending"
         issue = session.scalar(select(Job).where(Job.kind == "certificate.issue"))
-        assert issue.payload == {"resource_id": certificate_id}
+        assert issue.payload["resource_id"] == certificate_id
+        assert issue.payload["_context"] == {"name": "New SSL host", "kind": "certificates"}
         assert session.get(Job, host["operation_id"]).sequence < issue.sequence
 
     # Reopening and saving a pending managed certificate keeps the same request.

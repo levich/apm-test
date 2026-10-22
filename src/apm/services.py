@@ -47,21 +47,26 @@ def snapshot(session):
     ]
 
 
-def enqueue(session, kind: str, payload: dict) -> Job:
+def enqueue(session, kind: str, payload: dict, context=None) -> Job:
     import time
 
+    if context is None and payload.get("resource_id"):
+        resource = session.get(Resource, payload["resource_id"])
+        if resource:
+            context = {"name": resource.name, "kind": resource.kind}
+    payload = {**payload, **({"_context": context} if context else {})}
     job = Job(id=uid(), kind=kind, payload=payload, sequence=time.time_ns())
     session.add(job)
     session.flush()
     return job
 
 
-def enqueue_apply(session):
+def enqueue_apply(session, context=None):
     session.flush()
     revision = Revision(id=uid(), snapshot=snapshot(session))
     session.add(revision)
     session.flush()
-    job = enqueue(session, "apply", {"revision_id": revision.id})
+    job = enqueue(session, "apply", {"revision_id": revision.id}, context=context)
     return {"operation_id": job.id, "revision_id": revision.id}
 
 
@@ -242,6 +247,9 @@ def save_resource(session, config, user, kind: str, payload: ResourceInput, obje
         session.add(obj)
     session.flush()
     audit(session, user, "resource.update" if old else "resource.create", obj.id, kind=kind)
+    context = {"name": obj.name, "kind": kind}
+    from apm.certificates import enqueue_issuance
+
     if kind == "proxy-hosts" and data["tls"] in ("http", "dns") and not data.get("certificate_id"):
         certificate = Resource(
             id=uid(),
@@ -261,12 +269,12 @@ def save_resource(session, config, user, kind: str, payload: ResourceInput, obje
         session.add(certificate)
         obj.data = {**data, "certificate_id": certificate.id}
         session.flush()
-        operation = enqueue_apply(session)
-        enqueue(session, "certificate.issue", {"resource_id": certificate.id})
+        operation = enqueue_apply(session, context=context)
+        enqueue_issuance(session, certificate.id)
     else:
-        operation = enqueue_apply(session)
+        operation = enqueue_apply(session, context=context)
     if kind == "certificates" and data["mode"] != "custom":
-        enqueue(session, "certificate.issue", {"resource_id": obj.id})
+        enqueue_issuance(session, obj.id)
     return {**serialize(obj, user.role), **operation}
 
 

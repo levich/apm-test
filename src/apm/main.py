@@ -335,12 +335,12 @@ def create_app(config=None):
         return response
 
     @app.get("/api/v1/dashboard")
-    def dashboard(user=Depends(current), session=Depends(db)):
+    def dashboard(request: Request, user=Depends(current), session=Depends(db)):
         counts = dict(session.execute(select(Resource.kind, func.count()).group_by(Resource.kind)).all())
         jobs = session.scalars(select(Job).order_by(Job.created_at.desc()).limit(10)).all()
         return {
             "counts": counts,
-            "operations": [job_dict(j) for j in jobs],
+            "operations": [job_dict(j, request.cookies.get("apm_language", user.language)) for j in jobs],
             "applied": state_get(session, "applied", {}),
             "agent": state_get(session, "agent_status", {}),
             "capabilities": state_get(session, "capabilities", {"available": False}),
@@ -358,27 +358,22 @@ def create_app(config=None):
             raise HTTPException(404)
         return SCHEMAS[kind].model_json_schema()
 
-    def job_dict(job):
-        return {
-            "id": job.id,
-            "kind": job.kind,
-            "status": job.status,
-            "error": job.error,
-            "result": job.result,
-            "created_at": job.created_at,
-            "updated_at": job.updated_at,
-        }
+    def job_dict(job, language="en"):
+        from apm.operations import present
+
+        return present(job, language)
 
     @app.get("/api/v1/operations")
-    def operations(user=Depends(current), session=Depends(db)):
-        return [job_dict(j) for j in session.scalars(select(Job).order_by(Job.created_at.desc()).limit(100))]
+    def operations(request: Request, user=Depends(current), session=Depends(db)):
+        return [job_dict(j, request.cookies.get("apm_language", user.language))
+                for j in session.scalars(select(Job).order_by(Job.sequence.desc()).limit(100))]
 
     @app.get("/api/v1/operations/{object_id}")
-    def operation(object_id: str, user=Depends(current), session=Depends(db)):
+    def operation(object_id: str, request: Request, user=Depends(current), session=Depends(db)):
         row = session.get(Job, object_id)
         if not row:
             raise HTTPException(404)
-        return job_dict(row)
+        return job_dict(row, request.cookies.get("apm_language", user.language))
 
     @app.post("/api/v1/operations/reconcile")
     def discover(user=Depends(admin), session=Depends(db)):
@@ -479,10 +474,27 @@ def create_app(config=None):
     def resources(kind: str, user=Depends(current), session=Depends(db)):
         if kind not in SCHEMAS:
             raise HTTPException(404)
-        return [
-            serialize(r, user.role)
-            for r in session.scalars(select(Resource).where(Resource.kind == kind).order_by(Resource.name))
-        ]
+        objects = session.scalars(select(Resource).where(Resource.kind == kind).order_by(Resource.name)).all()
+        result = [serialize(r, user.role) for r in objects]
+        if kind in ("proxy-hosts", "certificates"):
+            from apm.certificates import active_issuance, certificate_info
+            from apm.health import plans, summary
+
+            all_resources = session.scalars(select(Resource)).all()
+            check_plans = plans([serialize(r) for r in all_resources]) if kind == "proxy-hosts" else {}
+            by_id = {r.id: r for r in all_resources}
+            for obj, item in zip(objects, result):
+                certificate = obj if kind == "certificates" else by_id.get(obj.data.get("certificate_id"))
+                item["certificate_info"] = certificate_info(
+                    config, certificate, obj.data.get("domains") if kind == "proxy-hosts" else None,
+                )
+                active = active_issuance(session, certificate.id) if certificate else None
+                item["active_operation"] = {"id": active.id, "status": active.status} if active else None
+                if kind == "proxy-hosts":
+                    item["health"] = summary(session, obj, check_plans[obj.id])
+                    item["ssl"] = {"configured": obj.data.get("tls") != "off",
+                                   "usable": item["certificate_info"]["status"] in ("valid", "expiring")}
+        return result
 
     @app.post("/api/v1/resources/{kind}", status_code=201)
     def create_resource(kind: str, data: ResourceInput, user=Depends(current), session=Depends(db)):
@@ -516,7 +528,7 @@ def create_app(config=None):
                 raise HTTPException(409, "Resource is referenced")
         session.delete(obj)
         audit(session, user, "resource.delete", object_id, kind=kind)
-        return enqueue_apply(session)
+        return enqueue_apply(session, context={"name": obj.name, "kind": kind})
 
     @app.post("/api/v1/resources/dns-profiles/{object_id}/test")
     def test_dns(object_id: str, user=Depends(admin), session=Depends(db)):
@@ -549,7 +561,26 @@ def create_app(config=None):
         obj.data = {**obj.data, **data}
         obj.version += 1
         audit(session, user, "certificate.upload", obj.id)
-        return enqueue_apply(session)
+        return enqueue_apply(session, context={"name": obj.name, "kind": obj.kind})
+
+    @app.post("/api/v1/resources/certificates/{object_id}/renew", status_code=202)
+    def renew_certificate(object_id: str, user=Depends(admin), session=Depends(db)):
+        from apm.certificates import active_issuance, enqueue_issuance
+
+        obj = get_resource(session, "certificates", object_id)
+        if not obj.enabled or obj.data.get("mode") == "custom":
+            raise HTTPException(422, "Only enabled managed certificates can be renewed")
+        if not obj.data.get("domains") or not obj.data.get("terms_agreed"):
+            raise HTTPException(422, "Certificate domains and ACME terms agreement are required")
+        if obj.data.get("mode") == "dns":
+            profile = get_resource(session, "dns-profiles", obj.data.get("dns_profile_id"))
+            if not profile.enabled:
+                raise HTTPException(422, "DNS profile is disabled")
+        if active_issuance(session, obj.id):
+            raise HTTPException(409, "Certificate issuance is already pending or running")
+        job = enqueue_issuance(session, obj.id, force=True)
+        audit(session, user, "certificate.renew", obj.id, operation_id=job.id)
+        return {"operation_id": job.id}
 
     @app.post("/api/v1/resources/client-cas/{object_id}/upload")
     async def upload_ca(
@@ -661,7 +692,7 @@ def create_app(config=None):
         language = request.cookies.get("apm_language", user.language)
         jobs = session.scalars(select(Job).order_by(Job.sequence.desc()).limit(8)).all()
         return templates.TemplateResponse(
-            request, "operations.html", {"jobs": jobs, "t": dictionary(language)}
+            request, "operations.html", {"jobs": [job_dict(j, language) for j in jobs], "t": dictionary(language)}
         )
 
     @app.get("/api/v1/openapi.json")
@@ -703,8 +734,12 @@ def create_app(config=None):
     def index(request: Request):
         return RedirectResponse("/ui/dashboard")
 
+    @app.get("/ui/documentation/{section}", response_class=HTMLResponse)
+    def documentation_page(section: str, request: Request, session=Depends(db)):
+        return ui("documentation", request, session, section)
+
     @app.get("/ui/{page}", response_class=HTMLResponse)
-    def ui(page: str, request: Request, session=Depends(db)):
+    def ui(page: str, request: Request, session=Depends(db), section: str = "index"):
         try:
             user = current(request, session)
         except HTTPException:
@@ -719,9 +754,20 @@ def create_app(config=None):
             "security",
             "logs",
             "metrics",
+            "documentation",
         ):
             raise HTTPException(404)
         language = request.cookies.get("apm_language", user.language)
+        documentation_context = {}
+        if page == "documentation":
+            from apm.documentation import guide, navigation
+
+            try:
+                html, title = guide(section, language)
+            except KeyError:
+                raise HTTPException(404) from None
+            documentation_context = {"documentation_html": html, "documentation_title": title,
+                                     "documentation_sections": navigation(language), "documentation_section": section}
         return templates.TemplateResponse(
             request,
             "app.html",
@@ -740,6 +786,7 @@ def create_app(config=None):
                     )
                 ),
                 "version": __version__,
+                **documentation_context,
             },
         )
 

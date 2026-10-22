@@ -77,7 +77,8 @@ def test_existing_compiler_scopes_policies_to_apm_hosts(existing):
     ]
     bundle = deployment(existing, resources)
     http = bundle.files["http.conf"]
-    globals, server = http.split("server {", 1)
+    globals = http
+    server = bundle.files["http/route.proxy.conf"]
     assert "access_log" not in globals
     assert "ssl_protocols" not in globals
     assert "server_tokens" not in globals
@@ -90,7 +91,8 @@ def test_existing_compiler_scopes_policies_to_apm_hosts(existing):
     assert "bootstrap" not in http
     assert "load_module" not in bundle.configuration
     assert "pid " not in bundle.configuration
-    assert bundle.files["stream.conf"].startswith("server {\naccess_log off;\n")
+    assert bundle.files["stream/tcp.stream.conf"].startswith("server {\naccess_log off;\n")
+    assert 'stream/tcp.stream.conf";' in bundle.files["stream.conf"]
 
 
 def test_validation_uses_full_config_without_switching_current(existing, monkeypatch):

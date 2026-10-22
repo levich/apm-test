@@ -1,5 +1,6 @@
 import fcntl
 import logging
+import threading
 import time
 from contextlib import contextmanager
 
@@ -124,7 +125,7 @@ class Worker:
         if kind == "certificate.issue":
             from apm.certificates import issue
 
-            return issue(self.db, self.config, payload["resource_id"])
+            return issue(self.db, self.config, payload["resource_id"], force=payload.get("force", False))
         if kind == "dns.test":
             from apm.dns import provider_for
 
@@ -208,21 +209,39 @@ class Worker:
     def run(self):
         with self.exclusive():
             self.recover()
+            stop = threading.Event()
+            monitor = threading.Thread(target=self.monitor_backends, args=(stop,), daemon=True)
+            monitor.start()
             if self.config.discovery_enabled:
-                import threading
-
                 from apm.discovery import event_watcher
 
                 threading.Thread(
                     target=event_watcher, args=(self.db, self.config, threading.Event()), daemon=True
                 ).start()
             last_maintenance = 0
-            while True:
-                if time.monotonic() - last_maintenance > 60:
-                    self.maintenance()
-                    last_maintenance = time.monotonic()
-                if not self.tick():
-                    time.sleep(1)
+            try:
+                while True:
+                    if time.monotonic() - last_maintenance > 60:
+                        self.maintenance()
+                        last_maintenance = time.monotonic()
+                    if not self.tick():
+                        time.sleep(1)
+            finally:
+                stop.set()
+                monitor.join(timeout=2)
+
+    def monitor_backends(self, stop):
+        from apm.health import INTERVAL, collect
+
+        # Own client/session: Certbot and apply operations must not block observation.
+        with httpx.Client(transport=httpx.HTTPTransport(uds=str(self.config.socket)),
+                          base_url="http://agent", timeout=60, trust_env=False) as client:
+            while not stop.is_set():
+                try:
+                    collect(self.db, client)
+                except Exception as error:
+                    logger.warning("Backend monitoring failed: %s", type(error).__name__)
+                stop.wait(INTERVAL)
 
     def maintenance(self):
         from apm.certificates import schedule_renewals

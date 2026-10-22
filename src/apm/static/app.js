@@ -48,10 +48,10 @@ async function api(path, options = {}) {
   return result;
 }
 function badge(value) {
-  const success = ["succeeded", "applied", "ready", "manual"].includes(value);
+  const success = ["succeeded", "applied", "ready", "manual", "up", "valid"].includes(value);
   return el("span", {
-    class: `badge ${success ? "bg-green-lt" : ["failed", "error", "rollback_failed"].includes(value) ? "bg-red-lt" : "bg-blue-lt"}`,
-    text: value,
+    class: `badge ${success ? "bg-green-lt" : ["failed", "error", "rollback_failed", "down", "expired", "key_mismatch", "invalid_files", "domain_mismatch", "not_yet_valid"].includes(value) ? "bg-red-lt" : ["partial", "expiring", "pending", "running"].includes(value) ? "bg-yellow-lt" : "bg-secondary-lt"}`,
+    text: t[`state_${value}`] || t[value] || value,
   });
 }
 function card(title, body) {
@@ -222,6 +222,8 @@ function addFieldHelp(wrapper, key, description = null) {
         "aria-label": t.close_help, onclick: () => closeFieldHelp(true) }),
     ]),
     el("p", { id: `${id}-description`, text: explanation }),
+    el("a", { href: `/ui/documentation/${page}#${page === "access-lists" && ["action", "address"].includes(key) ? `rules-${key}` : key}`, target: "_blank",
+      rel: "noopener", text: t.read_documentation }),
   );
   wrapper.classList.add("has-field-help");
   wrapper.prepend(trigger);
@@ -817,6 +819,7 @@ async function editResource(resource = null) {
   if (page === "access-lists") {
     fields.append(
       el("label", { class: "form-label", text: t.credentials }),
+      el("p", { class: "text-secondary", text: t.basic_credentials_hint }),
       el("textarea", {
         id: "basic-credentials",
         class: "form-control",
@@ -825,6 +828,8 @@ async function editResource(resource = null) {
       }),
     );
   }
+  fields.prepend(el("a", { class: "d-block mb-3", href: `/ui/documentation/${page}`,
+    text: t.read_documentation, target: "_blank", rel: "noopener" }));
 }
 async function upload(resource, ca = false) {
   let cert, key;
@@ -916,7 +921,10 @@ async function dashboard() {
   content.append(card(t.capabilities, capabilities));
 }
 async function resources() {
-  const rows = await api(`/api/v1/resources/${page}`);
+  const [rows, upstreams] = await Promise.all([
+    api(`/api/v1/resources/${page}`),
+    page === "proxy-hosts" ? api("/api/v1/resources/upstreams") : Promise.resolve([]),
+  ]);
   const items = rows.map((resource) => {
     const actions = el("div", { class: "resource-actions" });
     if (
@@ -926,6 +934,22 @@ async function resources() {
     )
       actions.append(button(t.edit, () => editResource(resource)));
     if (ctx.role === "admin") {
+      if (page === "certificates" && resource.data.mode !== "custom") {
+        const renew = button(t.renew, async () => {
+          renew.disabled = true;
+          try {
+            const operation = await api(`/api/v1/resources/certificates/${resource.id}/renew`, { method: "POST" });
+            message(`${t.operation_saved} ${operation.operation_id}`);
+            await load();
+          } catch (error) {
+            renew.disabled = false;
+            throw error;
+          }
+        });
+        renew.disabled = !!resource.active_operation || !resource.enabled;
+        renew.dataset.action = "renew";
+        actions.append(renew);
+      }
       if (page === "certificates" || page === "client-cas")
         actions.append(
           button(t.upload, () => upload(resource, page === "client-cas")),
@@ -994,6 +1018,36 @@ async function resources() {
       (resource.data.host
         ? `${resource.data.host}:${resource.data.port}`
         : resource.id);
+    if (page === "proxy-hosts") {
+      const domain = resource.data.domains.find((name) => !name.startsWith("*."));
+      const title = domain ? el("a", {
+        class: "resource-title", text: resource.name, target: "_blank", rel: "noopener noreferrer",
+        href: `${resource.ssl.configured ? "https" : "http"}://${domain.includes(":") ? `[${domain}]` : domain}/`,
+      }) : el("span", { class: "resource-title", text: resource.name, title: t.wildcard_link });
+      const destination = (route) => {
+        const upstream = upstreams.find((group) => group.id === route.upstream_id);
+        return route.upstream_id ? `${route.scheme}://${upstream?.name || "—"} (${t.upstreams})`
+          : `${route.scheme}://${route.host.includes(":") ? `[${route.host}]` : route.host}:${route.port}`;
+      };
+      const forward = el("div", {}, [text(destination(resource.data))]);
+      if (resource.data.locations.length) forward.append(el("details", { class: "route-details" }, [
+        el("summary", { text: `${t.locations} (${resource.data.locations.length})` }),
+        ...resource.data.locations.map((route) => el("div", { class: "resource-subtitle", text: `${route.path} → ${destination(route)}` })),
+      ]));
+      return [el("div", {}, [title, el("div", { class: "resource-subtitle", text: details }),
+        ...(!domain ? [el("small", { class: "text-secondary", text: t.wildcard_link })] : [])]),
+      forward, healthView(resource.health),
+      el("div", {}, [text(resource.ssl.configured ? "HTTPS" : "HTTP"),
+        ...(resource.ssl.configured && !resource.ssl.usable ? [el("small", { class: "d-block text-secondary", text: t.ssl_waiting })] : [])]),
+      resource.ssl.configured ? certificateView(resource.certificate_info, false) : "—",
+      badge(resource.enabled ? "enabled" : "disabled"), actions];
+    }
+    if (page === "certificates") return [
+      el("div", {}, [el("div", { class: "resource-title", text: resource.name }),
+        el("div", { class: "resource-subtitle", text: details }), badge(resource.enabled ? "enabled" : "disabled")]),
+      badge(resource.active_operation?.status || resource.data.status),
+      certificateView(resource.certificate_info), actions,
+    ];
     return [
       el("div", {}, [
         el("div", { class: "resource-title", text: resource.name }),
@@ -1008,8 +1062,33 @@ async function resources() {
     ];
   });
   content.replaceChildren(
-    table([t.name, t.status, t.source, t.version, t.actions], items),
+    table(page === "proxy-hosts" ? [t.name, t.destination, t.availability, "SSL", t.certificates, t.status, t.actions]
+      : page === "certificates" ? [t.name, t.issuance, t.validity, t.actions]
+      : [t.name, t.status, t.source, t.version, t.actions], items),
   );
+}
+function certificateView(info, dates = true) {
+  const status = badge(info.status);
+  status.textContent = t[`cert_${info.status}`] || info.status;
+  const children = [status];
+  if (dates && info.expires_at) children.push(
+    el("div", { class: "resource-subtitle", text: `${t.valid_from}: ${new Date(info.not_before * 1000).toLocaleString(ctx.language)}` }),
+    el("div", { class: "resource-subtitle", text: `${t.valid_until}: ${new Date(info.expires_at * 1000).toLocaleString(ctx.language)}` }),
+    el("div", { class: "resource-subtitle", text: `${t.days_remaining}: ${info.remaining_days}` }),
+  );
+  return el("div", { "data-certificate-status": info.status }, children);
+}
+function healthView(health) {
+  const children = [badge(health.status)];
+  if (health.checked_at) children.push(el("div", { class: "resource-subtitle", text: `${t.checked_at}: ${new Date(health.checked_at * 1000).toLocaleTimeString(ctx.language)}` }));
+  if (health.checks.length) children.push(el("details", { class: "route-details" }, [
+    el("summary", { text: t.details }),
+    ...health.checks.map((check) => el("div", { class: "resource-subtitle" }, [
+      text(`${check.route_path} → ${check.host}:${check.port}${check.backup ? " (backup)" : ""}: `),
+      badge(check.status), text(` · ${t[`reason_${check.reason}`] || check.reason}${check.http_status ? ` ${check.http_status}` : ""}`),
+    ])),
+  ]));
+  return el("div", { "data-health-status": health.status }, children);
 }
 async function operations() {
   const rows = await api("/api/v1/operations");
@@ -1018,12 +1097,15 @@ async function operations() {
       [t.name, t.status, t.created, t.error],
       rows.map((job) => [
         el("div", {}, [
-          el("div", { class: "resource-title", text: job.kind }),
-          el("div", { class: "operations-id", text: job.id }),
+          el("div", { class: "resource-title", text: job.title }),
         ]),
-        badge(job.status),
+        Object.assign(badge(job.status), { textContent: job.status_label }),
         new Date(job.created_at * 1000).toLocaleString(),
-        job.error || "—",
+        el("div", {}, [el("div", { text: job.message }),
+          job.next_step ? el("div", { class: "text-secondary", text: job.next_step }) : null,
+          el("details", { class: "operation-technical" }, [el("summary", { text: t.technical_details }),
+            el("small", { text: `${job.kind} · ${job.id}${job.error ? ` · ${job.error}` : ""}` })]),
+        ]),
       ]),
     ),
   );
@@ -1261,6 +1343,7 @@ async function security() {
   content.replaceChildren(card("TOTP / MFA", body));
 }
 async function load() {
+  if (page === "documentation") return;
   try {
     if (page === "dashboard") await dashboard();
     else if (page === "operations") await operations();
@@ -1342,3 +1425,11 @@ document
     }
   });
 load();
+if (["proxy-hosts", "certificates", "operations"].includes(page)) {
+  let refreshing = false;
+  setInterval(async () => {
+    if (refreshing || dialog.open || document.hidden) return;
+    refreshing = true;
+    try { await load(); } finally { refreshing = false; }
+  }, 5000);
+}

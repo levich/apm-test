@@ -1,0 +1,3 @@
+<div class="guide-layout"><nav class="card guide-nav" aria-label="{{ t.documentation }}"><div class="card-body">
+{% for item in documentation_sections %}<a class="d-block py-1 {{ 'fw-bold' if documentation_section==item.id }}" href="/ui/documentation/{{ item.id }}">{{ item.title }}</a>{% endfor %}
+</div></nav><article class="card guide-article"><div class="card-body">{{ documentation_html|safe }}</div></article></div>

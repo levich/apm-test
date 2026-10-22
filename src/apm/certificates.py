@@ -1,4 +1,5 @@
 import hashlib
+import math
 import os
 import shlex
 import subprocess
@@ -6,8 +7,9 @@ import sys
 from datetime import UTC, datetime
 
 from cryptography import x509
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from apm.db import Job, Resource, now
 from apm.schemas import Certificate
@@ -16,11 +18,66 @@ from apm.services import audit, enqueue, enqueue_apply
 
 
 def covered(domain, names):
+    domain = domain.rstrip(".").lower()
+    names = [name.rstrip(".").lower() for name in names]
     if domain in names:
         return True
     return any(
         n.startswith("*.") and domain.count(".") == n.count(".") and domain.endswith(n[1:]) for n in names
     )
+
+
+def certificate_info(config, resource, domains=None):
+    """Inspect local material, independent of the last issuance attempt."""
+    if not resource:
+        return {"status": "missing"}
+    fingerprint = resource.data.get("fingerprint") or ""
+    if len(fingerprint) != 64 or any(c not in "0123456789abcdef" for c in fingerprint):
+        return {"status": "missing" if resource.enabled else "disabled"}
+    directory = config.data_dir / "certificates" / resource.id / fingerprint
+    try:
+        chain = x509.load_pem_x509_certificates((directory / "fullchain.pem").read_bytes())
+        leaf = chain[0]
+        key = serialization.load_pem_private_key((directory / "privkey.pem").read_bytes(), password=None)
+        public_format = (serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        matching = key.public_key().public_bytes(*public_format) == leaf.public_key().public_bytes(*public_format)
+        try:
+            san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            names = san.get_values_for_type(x509.DNSName) + [str(v) for v in san.get_values_for_type(x509.IPAddress)]
+        except x509.ExtensionNotFound:
+            names = []
+        timestamp = now()
+        begins = int(leaf.not_valid_before_utc.timestamp())
+        expires = int(leaf.not_valid_after_utc.timestamp())
+        status = "valid"
+        if not matching:
+            status = "key_mismatch"
+        elif begins > timestamp:
+            status = "not_yet_valid"
+        elif expires <= timestamp:
+            status = "expired"
+        elif not all(covered(domain, names) for domain in (domains if domains is not None else resource.data.get("domains", []))):
+            status = "domain_mismatch"
+        elif expires - timestamp <= 30 * 86400:
+            status = "expiring"
+        return {"status": status if resource.enabled else "disabled", "not_before": begins, "expires_at": expires,
+                "remaining_days": math.ceil((expires - timestamp) / 86400), "domains": names}
+    except (ValueError, OSError, TypeError, IndexError, x509.DuplicateExtension, UnsupportedAlgorithm):
+        return {"status": "invalid_files" if resource.enabled else "disabled"}
+
+
+def active_issuance(session, resource_id):
+    return session.scalar(select(Job).where(
+        Job.kind == "certificate.issue", Job.status.in_(["pending", "running"]),
+        Job.payload["resource_id"].as_string() == resource_id,
+    ).order_by(Job.sequence))
+
+
+def enqueue_issuance(session, resource_id, force=False):
+    active = active_issuance(session, resource_id)
+    if active:
+        return active
+    return enqueue(session, "certificate.issue", {"resource_id": resource_id, **({"force": True} if force else {})})
 
 
 def install_certificate(config, resource_id, cert_pem, key_pem, domains):
@@ -89,21 +146,33 @@ def install_ca(config, resource_id, pem, crl_pem=None):
     return {"fingerprint": fingerprint}
 
 
-def issue(database, config, resource_id):
+def issue(database, config, resource_id, force=False):
+    try:
+        return _issue(database, config, resource_id, force)
+    except Exception:
+        with database.session() as session:
+            resource = session.get(Resource, resource_id)
+            if resource and resource.kind == "certificates":
+                resource.data = {**resource.data, "status": "error"}
+                resource.version += 1
+        raise
+
+
+def _issue(database, config, resource_id, force=False):
     with database.session() as session:
         resource = session.get(Resource, resource_id)
         if not resource or resource.kind != "certificates":
             raise ValueError("Certificate not found")
         data = Certificate.model_validate(resource.data)
         credentials = Vault(config.data_dir).decrypt(resource.secret) if resource.secret else {}
-        if data.mode == "custom" or not data.domains or not data.terms_agreed:
+        if not resource.enabled or data.mode == "custom" or not data.domains or not data.terms_agreed:
             raise ValueError("Managed certificate and explicit ACME terms agreement required")
     directory = config.data_dir / "acme"
     command = [
         config.certbot_binary,
         "certonly",
         "--non-interactive",
-        "--keep-until-expiring",
+        "--force-renewal" if force else "--keep-until-expiring",
         "--agree-tos",
         "--cert-name",
         resource_id,
@@ -159,9 +228,6 @@ def issue(database, config, resource_id):
         if credentials.get("eab_kid"):
             eab.unlink(missing_ok=True)
     if result.returncode:
-        with database.session() as session:
-            resource = session.get(Resource, resource_id)
-            resource.data = {**resource.data, "status": "error"}
         raise ValueError("Certbot issuance failed; inspect the local ACME log")
     live = directory / "config/live" / resource_id
     installed = install_certificate(
@@ -176,12 +242,13 @@ def issue(database, config, resource_id):
         resource.data = {**resource.data, **installed}
         resource.version += 1
         audit(session, "worker", "certificate.ready", resource_id, expires_at=installed["expires_at"])
-        enqueue_apply(session)
+        enqueue_apply(session, context={"name": resource.name, "kind": "certificates"})
     return {"certificate_id": resource_id, **installed}
 
 
 def schedule_renewals(database):
     with database.session() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
         for resource in session.scalars(
             select(Resource).where(Resource.kind == "certificates", Resource.enabled.is_(True))
         ):
@@ -203,5 +270,5 @@ def schedule_renewals(database):
                 )
             )
             if not active:
-                enqueue(session, "certificate.issue", {"resource_id": resource.id})
+                enqueue_issuance(session, resource.id)
                 state_set(session, key, {"at": now()})

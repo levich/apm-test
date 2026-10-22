@@ -393,6 +393,12 @@ def create_agent(config=None):
         response.raise_for_status()
         return response.json()
 
+    from apm.health import CheckRequest, check
+
+    @app.post("/backend-health")
+    def backend_health(data: CheckRequest):
+        return {"checks": check(data.targets)}
+
     @app.post("/logs/reopen")
     def reopen_logs():
         agent.command("-s", "reopen", "-c", str(config.root_config))

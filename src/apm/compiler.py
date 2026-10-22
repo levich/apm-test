@@ -2,6 +2,8 @@ import hashlib
 import ipaddress
 import json
 import re
+import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,6 +34,16 @@ def ident(value):
     return "apm_" + hashlib.sha256(value.encode()).hexdigest()[:20]
 
 
+def filename_slug(value):
+    alphabet = dict(zip(
+        "абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+        "a b v g d e e zh z i y k l m n o p r s t u f kh ts ch sh sch _ y _ e yu ya".split(),
+    ))
+    value = "".join(alphabet.get(c, c) for c in unicodedata.normalize("NFKC", value).casefold())
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9_-]+", "-", value).strip("-_")[:90] or "resource"
+
+
 @dataclass
 class Bundle:
     config: str
@@ -48,6 +60,20 @@ class Compiler:
         self.resources = {}
         self.runtime = {}
         self.http_extras = []
+        self.names = {}
+        self.http_policy = []
+
+    def fragment(self, scope, obj, lines):
+        kind = {
+            "proxy-hosts": "proxy", "redirect-hosts": "redirect", "streams": "stream",
+            "sites": "site", "upstreams": "upstream",
+        }[obj["kind"]]
+        name = f"{scope}/{self.names[obj['id']]}.{kind}.conf"
+        if scope == "http" and self.settings.angie_mode == "existing":
+            lines = [part for line in lines
+                     for part in ([line, *self.http_policy] if line == "server {" else [line])]
+        self.files[name] = "\n".join(lines) + "\n"
+        return f"include {q(self.root / name)};"
 
     def need(self, feature):
         info = self.caps.get(feature, {})
@@ -431,6 +457,18 @@ class Compiler:
 
     def compile(self, resources: list[dict]):
         self.resources = {r["id"]: r for r in resources if r.get("enabled", True)}
+        slugs = {obj["id"]: filename_slug(obj.get("name", obj["id"]))
+                 for obj in self.resources.values()}
+        counts = Counter((obj["kind"], slugs[obj["id"]]) for obj in self.resources.values())
+        used = set()
+        for obj in sorted(self.resources.values(), key=lambda value: value["id"]):
+            slug = slugs[obj["id"]]
+            if counts[obj["kind"], slug] > 1:
+                slug += "-" + hashlib.sha256(obj["id"].encode()).hexdigest()[:12]
+            while (obj["kind"], slug) in used:
+                slug += "-" + hashlib.sha256(obj["id"].encode()).hexdigest()[:12]
+            used.add((obj["kind"], slug))
+            self.names[obj["id"]] = slug
         for obj in self.resources.values():
             if obj["kind"] == "runtime":
                 self.runtime = obj["data"]
@@ -573,6 +611,7 @@ class Compiler:
         ]
         if not existing:
             http += managed_servers
+        self.http_policy = http_policy
         upstreams = [obj for obj in self.resources.values() if obj["kind"] == "upstreams"]
         https_hosts = [
             obj
@@ -615,10 +654,12 @@ class Compiler:
                     + (" down" if peer["down"] else "")
                 )
                 block.append(f"server {address(peer['host'], peer['port'])} {flags};")
-            http += [*block, "}"]
+            http.append(self.fragment("http", obj, [*block, "}"]))
         stream = [] if existing else ["access_log off;"]
+        stream_upstreams = set()
         for obj in self.resources.values():
             data = obj["data"]
+            http_start, stream_start = len(http), len(stream)
             if obj["kind"] == "proxy-hosts":
                 http += self.proxy(obj)
             elif obj["kind"] == "redirect-hosts":
@@ -639,7 +680,8 @@ class Compiler:
                 if data.get("upstream_id"):
                     upstream = self.ref(data["upstream_id"], "upstreams")
                     name = ident(upstream["id"])
-                    if not any(f"upstream {name} " in line for line in stream):
+                    if upstream["id"] not in stream_upstreams:
+                        upstream_start = len(stream)
                         stream += [f"upstream {name} {{", f"zone {name}_stream 256k;"]
                         strategy = upstream["data"]["strategy"]
                         if strategy == "least_conn":
@@ -652,6 +694,11 @@ class Compiler:
                                 f"server {address(peer['host'], peer['port'])} weight={peer['weight']}{flags};"
                             )
                         stream.append("}")
+                        upstream_lines = stream[upstream_start:]
+                        del stream[upstream_start:]
+                        stream.append(self.fragment("stream", upstream, upstream_lines))
+                        stream_upstreams.add(upstream["id"])
+                        stream_start = len(stream)
                     target = name
                 cert = self.certificate(data.get("certificate_id"))
                 if data.get("certificate_id") and not cert:
@@ -694,6 +741,9 @@ class Compiler:
                         "location / { return 503; }",
                         "}",
                     ]
+                    lines = http[http_start:]
+                    del http[http_start:]
+                    http.append(self.fragment("http", obj, lines))
                     continue
                 directory = root / "sites" / data["root_id"]
                 http += [
@@ -716,6 +766,14 @@ class Compiler:
                         f"fastcgi_pass {q(php)}; }}",
                     ]
                 http += ["}"]
+            if len(http) > http_start and obj["kind"] in ("proxy-hosts", "redirect-hosts", "sites"):
+                lines = http[http_start:]
+                del http[http_start:]
+                http.append(self.fragment("http", obj, lines))
+            if len(stream) > stream_start and obj["kind"] == "streams":
+                lines = stream[stream_start:]
+                del stream[stream_start:]
+                stream.append(self.fragment("stream", obj, lines))
         geo_ids = {
             obj["data"]["geo_policy_id"]
             for obj in self.resources.values()
