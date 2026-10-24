@@ -1,6 +1,7 @@
 """Exercise the real Tabler UI against a running local development instance."""
 
 import argparse
+import json
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -11,15 +12,110 @@ from apm.config import Settings
 from apm.db import Database, Job
 
 
+def check_logs(page, args):
+    directory = args.data / "logs"
+    directory.mkdir(exist_ok=True)
+    records = [
+        {"time": "2026-10-25T10:30:00+03:00", "host": "browser.example.com", "ip": "192.0.2.42",
+         "method": "GET", "path": f"/api/needle/{index}", "status": 502}
+        for index in range(61)
+    ] + [
+        {"time": "2026-10-25T10:31:00+03:00", "host": "other.example.com", "ip": "198.51.100.1",
+         "method": "POST", "path": "/health", "status": 200},
+        {"message": '<img src=x onerror="alert(1)">'},
+    ]
+    (directory / "access.log").write_text("".join(json.dumps(record) + "\n" for record in records))
+    error_path = directory / "error.log"
+    error_path.write_text(
+        '2026/10/25 10:30:00 [error] 123#456: connection refused, client: 192.0.2.42, '
+        'request: "GET /api HTTP/1.1", host: "browser.example.com"\n'
+        '2026/10/25 10:31:00 [warn] 123#456: upstream timed out\n'
+    )
+    page.goto(args.url + "/ui/logs")
+    expect(page.locator(".log-table tbody tr")).to_have_count(63)
+    assert page.locator(".log-table img").count() == 0
+    assert '<img src=x onerror="alert(1)">' in page.locator(".log-table").inner_text()
+    for key, value in [("q", "NEEDLE"), ("host", "BROWSER.EXAMPLE"), ("ip", "192.0.2."), ("status", "5xx")]:
+        page.locator(f"#log-{key}").fill(value)
+    page.locator("#log-method").select_option("GET")
+    page.locator("#log-limit").select_option("50")
+    page.locator('#log-filters button[type="submit"]').click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(50)
+    expect(page.locator(".log-table tbody tr").first).to_contain_text("/api/needle/60")
+    page.locator("#log-older").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(11)
+    expect(page.locator("#log-older")).to_be_disabled()
+    page.reload()
+    expect(page.locator(".log-table tbody tr")).to_have_count(11)
+    assert page.locator("#log-q").input_value() == "NEEDLE"
+    page.locator("#refresh").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(11)
+    page.locator("#log-newer").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(50)
+    page.screenshot(path=str(args.output / "logs-access.png"), full_page=True)
+    page.locator("#log-q").fill("no-matching-record")
+    page.locator("#log-q").press("Enter")
+    expect(page.locator(".empty-state")).to_contain_text("Записей по этим фильтрам нет")
+    page.locator("#log-reset").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(63)
+    page.locator("#log-kind").select_option("error")
+    expect(page.locator(".log-table tbody tr")).to_have_count(2)
+    assert page.locator("#log-status").is_hidden() and page.locator("#log-level").is_visible()
+    page.locator("#log-level").select_option("error")
+    page.locator('#log-filters button[type="submit"]').click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(1)
+    expect(page.locator(".log-table")).to_contain_text("connection refused")
+    page.screenshot(path=str(args.output / "logs-error.png"), full_page=True)
+    page.locator("#log-auto").check()
+    with error_path.open("a") as stream:
+        stream.write("2026/10/25 10:32:00 [error] 123#456: new auto refresh record\n")
+    expect(page.locator(".log-table tbody tr")).to_have_count(2, timeout=10000)
+    page.locator("#log-auto").uncheck()
+    # Rotation can remove every record on the current older page.
+    page.locator("#log-kind").select_option("access")
+    page.locator("#log-reset").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(63)
+    page.locator("#log-limit").select_option("50")
+    page.locator('#log-filters button[type="submit"]').click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(50)
+    page.locator("#log-older").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(13)
+    (directory / "access.log").write_text(json.dumps(records[0]) + "\n")
+    page.locator("#refresh").click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(1)
+    expect(page.locator("#log-newer")).to_be_disabled()
+    expect(page.locator(".log-table")).to_contain_text("/api/needle/0")
+    page.locator("#log-kind").select_option("error")
+    expect(page.locator(".log-table tbody tr")).to_have_count(3)
+    page.locator("#log-level").select_option("error")
+    page.locator('#log-filters button[type="submit"]').click()
+    expect(page.locator(".log-table tbody tr")).to_have_count(2)
+    page.locator("#language-switch").click()
+    expect(page.locator("h1")).to_have_text("Angie logs")
+    expect(page.locator(".log-table")).to_contain_text("connection refused")
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.locator("#theme-switch").click()
+    page.screenshot(path=str(args.output / "logs-mobile-dark.png"), full_page=True)
+    page.locator("#theme-switch").click()
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.locator("#language-switch").click()
+    expect(page.locator("h1")).to_have_text("Журналы Angie")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:18181")
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--browser-executable", type=Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(args=["--disable-gpu"])
+        browser = playwright.chromium.launch(
+            args=["--disable-gpu"],
+            executable_path=str(args.browser_executable) if args.browser_executable else None,
+        )
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         errors, network = [], []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -44,6 +140,7 @@ def main():
         page.wait_for_url("**/ui/dashboard")
         page.wait_for_selector(".dashboard-grid")
         page.screenshot(path=str(args.output / "dashboard.png"), full_page=True)
+        check_logs(page, args)
         page.goto(args.url + "/ui/proxy-hosts")
         page.locator("#create").click()
         page.wait_for_selector("dialog[open]")
@@ -80,6 +177,27 @@ def main():
         assert backend_popup.is_hidden()
         domain.locator("textarea").click()
         assert domain.locator(".field-help-popup").is_hidden()
+        backend_scheme = page.locator('#proxy-panel-details [data-field="scheme"] select')
+        backend_verify = page.locator('[data-field="upstream_verify"] input')
+        assert backend_verify.is_hidden()
+        backend_scheme.select_option("https")
+        assert backend_verify.is_visible() and backend_verify.is_checked()
+        assert "самоподписанным" in page.locator("#proxy-panel-details").inner_text()
+        backend_verify.uncheck()
+        page.locator('[data-field="upstream_sni"] input').fill("backend.example.test")
+        backend_scheme.select_option("http")
+        assert backend_verify.is_hidden()
+        backend_scheme.select_option("grpcs")
+        assert backend_verify.is_visible() and not backend_verify.is_checked()
+        backend_scheme.select_option("grpc")
+        assert backend_verify.is_hidden()
+        backend_scheme.select_option("https")
+        page.screenshot(path=str(args.output / "proxy-backend-tls.png"), full_page=True)
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.locator("#editor").evaluate("node => node.scrollWidth <= node.clientWidth")
+        backend_verify.scroll_into_view_if_needed()
+        page.screenshot(path=str(args.output / "proxy-backend-tls-mobile.png"), full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 1000})
         page.locator('#editor button[type="submit"]').click()
         page.wait_for_selector("dialog[open]", state="hidden")
         page.get_by_text("Browser route", exact=True).wait_for()
@@ -89,6 +207,10 @@ def main():
         page.screenshot(path=str(args.output / "hosts.png"), full_page=True)
         page.get_by_text("Изменить", exact=True).first.click()
         page.wait_for_selector("dialog[open]")
+        assert backend_scheme.input_value() == "https"
+        assert backend_verify.is_visible() and not backend_verify.is_checked()
+        assert page.locator('[data-field="upstream_sni"] input').input_value() == "backend.example.test"
+        backend_scheme.select_option("http")
         page.locator("#editor-name").fill("Browser route edited")
         page.get_by_role("tab", name="Дополнительно", exact=True).click()
         page.locator('[data-field="timeout_seconds"] input').fill("123")
@@ -102,7 +224,20 @@ def main():
         page.get_by_role("button", name="Закрыть справку", exact=True).click()
         assert locations.locator('[data-field="path"] input').input_value() == "/api"
         locations.locator('[data-field="port"] input').fill("8090")
+        locations.locator('[data-field="scheme"] select').select_option("https")
         page.get_by_role("tab", name="Основное", exact=True).click()
+        assert backend_verify.is_visible() and not backend_verify.is_checked()
+        page.get_by_role("tab", name="Пути", exact=True).click()
+        locations.get_by_role("button", name="×", exact=True).click()
+        page.get_by_role("tab", name="Основное", exact=True).click()
+        assert backend_verify.is_hidden()
+        page.get_by_role("tab", name="Пути", exact=True).click()
+        locations.get_by_role("button", name="＋", exact=True).click()
+        locations.locator('[data-field="path"] input').fill("/api")
+        locations.locator('[data-field="port"] input').fill("8090")
+        locations.locator('[data-field="scheme"] select').select_option("grpcs")
+        page.get_by_role("tab", name="Основное", exact=True).click()
+        assert backend_verify.is_visible() and not backend_verify.is_checked()
         assert page.locator("#editor-name").input_value() == "Browser route edited"
         page.locator('#editor button[type="submit"]').click()
         page.get_by_text("Browser route edited", exact=True).wait_for()
@@ -116,6 +251,9 @@ def main():
         assert route["data"]["timeout_seconds"] == 123
         assert route["data"]["locations"][0]["path"] == "/api"
         assert route["data"]["locations"][0]["port"] == 8090
+        assert route["data"]["locations"][0]["scheme"] == "grpcs"
+        assert route["data"]["upstream_verify"] is False
+        assert route["data"]["upstream_sni"] == "backend.example.test"
 
         # All certificate requests stay queued: this isolated UI server has no worker.
         page.locator("#create").click()
@@ -278,6 +416,9 @@ def main():
             "Application IP address" in page.locator('[data-field="host"] > .field-help-popup').inner_text()
         )
         page.get_by_role("button", name="Close help", exact=True).click()
+        backend_scheme.select_option("https")
+        assert backend_verify.is_visible() and backend_verify.is_checked()
+        assert "self-signed" in page.locator("#proxy-panel-details").inner_text()
         page.locator("#editor-cancel").click()
         page.goto(args.url + "/ui/sites")
         page.get_by_role("button", name="Edit", exact=True).click()
@@ -356,7 +497,7 @@ def main():
         assert not errors, errors
         assert not network, network
         print(
-            "Browser checks passed: proxy links/availability, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
+            "Browser checks passed: Angie access/error logs, search/filters/pagination/auto refresh, proxy links/availability, backend TLS verification/SNI persistence, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
         )
         browser.close()
 

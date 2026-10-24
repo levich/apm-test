@@ -613,6 +613,7 @@ function groupProxyFields(nodes, nameInput, enabledInput, pools, resource) {
     if (title) block.append(el("h3", { text: title }));
     block.append(grid);
     panels[panel].append(block);
+    return block;
   }
   for (const key of ["domains", "locations", "certificate_id", "tls", "dns_profile_id", "acme_email", "acme_terms_agreed", "access_ids", "blocked_user_agents", "advanced"])
     if (nodes[key]) nodes[key].element.classList.add("proxy-full");
@@ -620,6 +621,16 @@ function groupProxyFields(nodes, nameInput, enabledInput, pools, resource) {
   section("details", "", ["domains"]);
   section("details", t.proxy_backend, ["scheme", "host", "port"], "proxy-backend");
   section("details", "", ["upstream_id", "access_ids"]);
+  const upstreamTLS = section("details", t.proxy_upstream_tls, ["upstream_verify", "upstream_sni"]);
+  upstreamTLS.append(el("p", { class: "text-secondary mt-3 mb-0", text: t.proxy_upstream_tls_hint }));
+  function syncUpstreamTLS() {
+    upstreamTLS.hidden = ![nodes.scheme.get(), ...nodes.locations.get().map((location) => location.scheme)]
+      .some((scheme) => ["https", "grpcs"].includes(scheme));
+  }
+  nodes.scheme.element.addEventListener("change", syncUpstreamTLS);
+  nodes.locations.element.addEventListener("change", syncUpstreamTLS);
+  nodes.locations.element.addEventListener("click", syncUpstreamTLS);
+  syncUpstreamTLS();
   section("details", t.proxy_options, ["websocket", "compression", "noindex"]);
   panels.details.append(button(t.ssl_configure, () => selectTab("ssl")));
   panels.locations.append(el("p", { class: "text-secondary", text: t.proxy_locations_hint }));
@@ -632,7 +643,6 @@ function groupProxyFields(nodes, nameInput, enabledInput, pools, resource) {
   panels.advanced.append(el("p", { class: "text-secondary", text: t.proxy_advanced_hint }));
   section("advanced", t.proxy_access, ["auth_provider_id", "header_policy_id", "geo_policy_id", "crowdsec_profile_id", "blocked_user_agents"]);
   section("advanced", t.proxy_performance, ["rate", "connection_limit", "max_body_mb", "timeout_seconds", "request_buffering", "response_buffering", "upstream_compression"]);
-  section("advanced", t.proxy_upstream_tls, ["upstream_verify", "upstream_sni"]);
   section("advanced", t.proxy_custom_config, ["advanced"]);
   section("advanced", "", Object.keys(nodes).filter((key) => !placed.has(key)));
   editorReveal = (input) => {
@@ -1217,21 +1227,172 @@ async function audit() {
     ),
   );
 }
+let refreshLogs = null;
 async function logs() {
-  const result = await api("/api/v1/logs/access");
+  if (refreshLogs) return refreshLogs();
+  const initial = new URLSearchParams(location.search), controls = {}, wrappers = {};
+  let active = new URLSearchParams(), offset = 0, sequence = 0, timer = null;
+  const grid = el("div", { class: "log-filter-grid" }),
+    form = el("form", { id: "log-filters" }, [grid]),
+    results = el("div", { class: "log-results" }),
+    summary = el("span", { class: "text-secondary", role: "status" }),
+    warning = el("p", { class: "alert alert-warning mb-0", text: t.log_window }),
+    updated = el("span", { class: "text-secondary" });
+  warning.hidden = true;
+  function select(options) {
+    return el("select", { class: "form-select" }, options.map(([value, label]) =>
+      el("option", { value, text: label })));
+  }
+  function field(key, label, node) {
+    node.id = `log-${key}`;
+    node.name = key;
+    controls[key] = node;
+    wrappers[key] = el("div", { class: `log-filter log-filter-${key}` }, [
+      el("label", { class: "form-label", for: node.id, text: label }), node,
+    ]);
+    grid.append(wrappers[key]);
+    if (initial.has(key)) node.value = initial.get(key);
+    return node;
+  }
+  const kind = field("kind", t.log_source, select([
+    ["access", t.log_access], ...(ctx.role === "admin" ? [["error", t.log_error]] : []),
+  ]));
+  if (!kind.value) kind.value = "access";
+  field("q", t.log_search, el("input", {
+    type: "search", class: "form-control", maxlength: "500", placeholder: t.log_search_hint,
+  }));
+  field("host", t.log_host, el("input", { class: "form-control", maxlength: "255", placeholder: "example.com" }));
+  field("ip", "IP", el("input", { class: "form-control", maxlength: "255", placeholder: "192.0.2." }));
+  field("method", t.log_method, select(["", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"]
+    .map((value) => [value, value || t.log_all])));
+  field("status", t.log_status, el("input", {
+    class: "form-control", placeholder: "404 / 4xx / 5xx", pattern: "[1-5]([0-9]{2}|xx)", maxlength: "3",
+  }));
+  field("level", t.log_level, select(["", "emerg", "alert", "crit", "error", "warn", "notice", "info", "debug"]
+    .map((value) => [value, value || t.log_all])));
+  for (const [key, label] of [["since", t.log_since], ["until", t.log_until]]) {
+    const node = field(key, label, el("input", { type: "datetime-local", step: "1", class: "form-control" }));
+    if (initial.has(key)) {
+      const date = new Date(initial.get(key));
+      if (!Number.isNaN(date.getTime())) {
+        node.value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      }
+    }
+  }
+  const limit = field("limit", t.log_limit, select([50, 100, 200, 500].map((value) => [value, String(value)])));
+  if (!limit.value || !initial.has("limit")) limit.value = "200";
+  const auto = el("input", { type: "checkbox", id: "log-auto", class: "form-check-input" }),
+    submit = el("button", { type: "submit", class: "btn btn-primary", text: t.log_apply }),
+    previous = button(t.log_newer, async () => {
+      offset = Math.max(0, offset - Number(active.get("limit")));
+      await refreshLogs();
+    }),
+    next = button(t.log_older, async () => {
+      offset += Number(active.get("limit"));
+      await refreshLogs();
+    });
+  previous.id = "log-newer";
+  next.id = "log-older";
+  function syncKind() {
+    wrappers.status.hidden = kind.value !== "access";
+    controls.status.disabled = kind.value !== "access";
+    wrappers.level.hidden = kind.value !== "error";
+    controls.level.disabled = kind.value !== "error";
+  }
+  function capture() {
+    if (!form.reportValidity()) return false;
+    if (controls.since.value && controls.until.value && controls.since.value > controls.until.value) {
+      message(t.log_invalid_range, true);
+      return false;
+    }
+    active = new URLSearchParams();
+    for (const [key, node] of Object.entries(controls)) {
+      if (key === "kind" || node.disabled || !node.value.trim()) continue;
+      active.set(key, ["since", "until"].includes(key) ? new Date(node.value).toISOString() : node.value.trim());
+    }
+    active.set("kind", kind.value);
+    offset = 0;
+    return true;
+  }
+  refreshLogs = async () => {
+    const request = ++sequence, params = new URLSearchParams(active), source = params.get("kind");
+    params.delete("kind");
+    params.set("offset", String(offset));
+    results.setAttribute("aria-busy", "true");
+    previous.disabled = next.disabled = true;
+    try {
+      const result = await api(`/api/v1/logs/${source}?${params}`);
+      if (request !== sequence) return;
+      if (offset && offset >= result.matched) {
+        offset = Math.max(0, Math.floor((result.matched - 1) / result.limit) * result.limit);
+        return refreshLogs();
+      }
+      document.getElementById("notice").classList.add("d-none");
+      const cell = (value, className = "") => el("span", { class: className, text: String(value ?? "—") });
+      const view = table(
+        source === "access" ? [t.log_time, t.log_host, "IP", t.log_method, "URI", t.log_status]
+          : [t.log_time, t.log_level, t.log_message],
+        result.entries.map((row) => source === "access" ? [
+          row.time || "—", cell(row.host), cell(row.ip, "font-monospace"), cell(row.method),
+          cell(row.path ?? row.message, "log-message font-monospace"), cell(row.status),
+        ] : [row.time || "—", cell(row.level), cell(row.message, "log-message font-monospace")]),
+      );
+      view.classList.add("log-table");
+      if (!result.entries.length) view.querySelector(".empty-state").textContent =
+        !result.exists || !result.scanned ? (source === "access" ? t.log_empty_access : t.log_empty_error)
+          : t.log_no_matches;
+      results.replaceChildren(view);
+      summary.textContent = `${t.log_found}: ${result.matched} · ${t.log_shown}: ${result.entries.length ? offset + 1 : 0}–${offset + result.entries.length} · ${t.log_scanned}: ${result.scanned}`;
+      warning.hidden = !result.truncated;
+      previous.disabled = offset === 0;
+      next.disabled = !result.has_more;
+      updated.textContent = `${t.log_updated}: ${new Date().toLocaleTimeString()}`;
+      const url = new URLSearchParams(active);
+      if (offset) url.set("offset", String(offset));
+      history.replaceState(null, "", `${location.pathname}?${url}`);
+    } finally {
+      if (request === sequence) results.setAttribute("aria-busy", "false");
+    }
+  };
+  async function apply() {
+    if (capture()) await refreshLogs();
+  }
+  const reset = button(t.log_reset, async () => {
+    for (const [key, node] of Object.entries(controls)) if (key !== "kind") node.value = key === "limit" ? "200" : "";
+    await apply();
+  });
+  reset.id = "log-reset";
+  form.append(el("div", { class: "log-actions" }, [
+    submit, reset,
+    el("label", { class: "form-check mb-0" }, [auto, el("span", { class: "form-check-label", text: t.log_auto })]),
+  ]));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    apply().catch((error) => message(error.message, true));
+  });
+  kind.addEventListener("change", () => {
+    syncKind();
+    apply().catch((error) => message(error.message, true));
+  });
+  auto.addEventListener("change", () => {
+    clearInterval(timer);
+    timer = auto.checked ? setInterval(() => {
+      if (!document.hidden && offset === 0 && results.getAttribute("aria-busy") !== "true")
+        refreshLogs().catch((error) => message(error.message, true));
+    }, 5000) : null;
+  });
+  window.addEventListener("pagehide", () => clearInterval(timer), { once: true });
   content.replaceChildren(
-    table(
-      ["Time", "Host", "IP", "Method", "URI", "Status"],
-      result.entries.map((row) => [
-        row.time || "—",
-        row.host || "—",
-        row.ip || "—",
-        row.method || "—",
-        row.path || "—",
-        String(row.status || "—"),
-      ]),
-    ),
+    el("p", { class: "text-secondary", text: t.log_hint }), card(t.log_filters, form),
+    el("div", { class: "log-summary" }, [summary, updated]), warning, results,
+    el("div", { class: "log-pagination" }, [previous, next]),
   );
+  syncKind();
+  active = new URLSearchParams({ kind: kind.value, limit: limit.value });
+  if (!capture()) return;
+  const savedOffset = Number(initial.get("offset"));
+  if (Number.isInteger(savedOffset) && savedOffset >= 0 && savedOffset <= 10000) offset = savedOffset;
+  await refreshLogs();
 }
 async function metrics() {
   const result = await api("/api/v1/metrics");

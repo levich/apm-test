@@ -2,11 +2,12 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 import pyotp
 from authlib.integrations.starlette_client import OAuth
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +29,7 @@ from apm.db import (
     state_set,
 )
 from apm.i18n import dictionary
+from apm.logs import LogQuery, query_logs
 from apm.schemas import ADMIN_KINDS, SCHEMAS, LoginInput, ResourceInput, SetupInput, UserInput
 from apm.security import Vault, digest, passwords, verify_password
 from apm.services import (
@@ -663,14 +665,15 @@ def create_app(config=None):
         return HTMLResponse(document)
 
     @app.get("/api/v1/logs/{kind}")
-    def logs(kind: str, user=Depends(current)):
-        from apm.observability import tail
-
+    def logs(kind: str, filters: Annotated[LogQuery, Query()], user=Depends(current)):
         if kind not in ("access", "error"):
             raise HTTPException(404)
         if kind == "error":
             require_role(user, "admin")
-        return {"entries": tail(config.data_dir / "logs" / (kind + ".log"))}
+        try:
+            return query_logs(config.data_dir / "logs" / (kind + ".log"), kind, filters)
+        except OSError:
+            raise HTTPException(503, "Log file is unavailable") from None
 
     @app.get("/api/v1/backups/{backup_id}/download")
     def download_backup(backup_id: str, user=Depends(admin)):

@@ -5,6 +5,32 @@
     "Segoe UI", sans-serif;
   --tblr-primary: #1765e8;
 }
+.log-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+.log-filter { min-width: 0; }
+.log-filter-q { grid-column: span 2; }
+.log-actions, .log-summary, .log-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.log-actions { margin-top: 20px; }
+.log-summary { justify-content: space-between; margin-bottom: 12px; font-size: 13px; }
+.log-pagination { justify-content: flex-end; margin-top: 16px; }
+.log-results { margin-top: 12px; min-width: 0; }
+.log-results[aria-busy="true"] { opacity: 0.6; }
+.log-table td { vertical-align: top; font-size: 13px; }
+.log-table td:first-child { white-space: nowrap; }
+.log-message { display: block; min-width: 200px; max-width: 640px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .log-filter-grid { grid-template-columns: minmax(0, 1fr); }
+  .log-filter-q { grid-column: auto; }
+  .log-filter input { max-width: 100%; min-width: 0; }
+}
 body {
   margin: 0;
   background: #f6f8fb;

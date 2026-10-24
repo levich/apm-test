@@ -349,7 +349,9 @@ Example: `false`.
 ### `upstream_verify`
 
 <!-- setting:upstream_verify -->
-Verify the HTTPS/gRPCS backend certificate against the configured system CA bundle. Keep enabled for trusted TLS connections. Disabling removes certificate verification; it does not repair an invalid certificate.
+Verify the backend TLS certificate against the system CA bundle. Uncheck this for a self-signed, expired or otherwise invalid backend certificate. This disables certificate and hostname verification. For proxy hosts, the setting applies to all HTTPS/gRPCS locations. Verification is enabled by default.
+
+The Upstream TLS section appears when the default or a custom location uses HTTPS or gRPCS. Uncheck Verify upstream TLS certificate, save the host and confirm successful application in Operations.
 
 Format: `boolean`. Default: `true`.
 

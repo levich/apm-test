@@ -80,7 +80,7 @@ EN = {
     "request_buffering": "For HTTP/HTTPS backends, read the request body into Angie buffers before sending it to the application. Disabling can help streaming uploads. AppSec requires request buffering in this project.",
     "response_buffering": "Buffer HTTP/HTTPS backend responses in Angie before delivery to the client. Disabling can help streaming and Server-Sent Events. It also means slow clients can keep backend connections busy longer.",
     "upstream_compression": "For HTTP/HTTPS backends, allow the client's Accept-Encoding header to reach the application. When disabled, Angie clears it. Response compression toward the client is controlled separately by Response compression.",
-    "upstream_verify": "Verify the HTTPS/gRPCS backend certificate against the configured system CA bundle. Keep enabled for trusted TLS connections. Disabling removes certificate verification; it does not repair an invalid certificate.",
+    "upstream_verify": "Verify the backend TLS certificate against the system CA bundle. Uncheck this for a self-signed, expired or otherwise invalid backend certificate. This disables certificate and hostname verification. For proxy hosts, the setting applies to all HTTPS/gRPCS locations. Verification is enabled by default.",
     "upstream_sni": "TLS server name used for backend SNI and certificate verification. Usually the DNS name on the application's certificate. When empty, Angie uses the configured backend host.",
     "advanced": "Administrator-owned Angie directives inside this host's server block. Do not paste a complete configuration or repeat generated blocks. The candidate is checked with angie -t; a rejected candidate keeps the previous working configuration.",
 }
@@ -123,7 +123,7 @@ RU = {
     "request_buffering": "Для HTTP/HTTPS-backend сначала читает тело запроса в буферы Angie, затем отправляет приложению. Отключение может помочь потоковым загрузкам. Для AppSec в этом проекте буферизация запросов обязательна.",
     "response_buffering": "Буферизует ответы HTTP/HTTPS-приложения в Angie перед передачей клиенту. Отключение может помочь потоковым ответам и Server-Sent Events, но медленные клиенты будут дольше занимать соединения с приложением.",
     "upstream_compression": "Для HTTP/HTTPS-backend разрешает передавать приложению клиентский Accept-Encoding. Если выключено, Angie очищает этот заголовок. Сжатие ответов клиенту задаётся отдельно в «Сжатии ответов».",
-    "upstream_verify": "Проверяет HTTPS/gRPCS-сертификат backend по системному набору доверенных CA. Обычно оставляйте включённым. Отключение убирает проверку сертификата, но не исправляет неверный сертификат.",
+    "upstream_verify": "Проверяет TLS-сертификат backend по системному набору доверенных CA. Для самоподписанного, просроченного или другого недействительного сертификата снимите флажок. Это отключает проверку сертификата и имени backend. У прокси-хоста настройка действует для всех HTTPS/gRPCS-маршрутов. По умолчанию проверка включена.",
     "upstream_sni": "TLS-имя для SNI и проверки сертификата приложения. Обычно это доменное имя из сертификата backend. Если поле пустое, используется настроенный адрес backend.",
     "advanced": "Директивы Angie внутри блока server этого хоста, доступные администратору. Не вставляйте полный конфиг или повторно сгенерированные блоки. Кандидат проверяется angie -t; при отклонении сохраняется прежняя рабочая конфигурация.",
 }

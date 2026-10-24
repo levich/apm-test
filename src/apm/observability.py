@@ -1,6 +1,4 @@
-import json
 import time
-from pathlib import Path
 
 from apm.db import state_get, state_set
 
@@ -17,21 +15,6 @@ def collect(database, payload, retention_days):
         points = [p for p in series if p["at"] >= cutoff][-10079:] + [point]
         state_set(session, "metrics", {"points": points})
         state_set(session, "metrics_latest", {"at": timestamp, "data": payload})
-
-
-def tail(path: Path, maximum=200):
-    if not path.is_file():
-        return []
-    with path.open("rb") as stream:
-        stream.seek(max(0, path.stat().st_size - 256 * 1024))
-        block = stream.read(256 * 1024).decode(errors="replace")
-    rows = []
-    for line in block.splitlines()[-maximum:]:
-        try:
-            rows.append(json.loads(line))
-        except ValueError:
-            rows.append({"message": line[:2000]})
-    return rows
 
 
 def rotate(config, client):
