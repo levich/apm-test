@@ -4,6 +4,10 @@ from apm.field_help import PAGES_RU as FIELD_HELP_PAGES_RU
 from apm.field_help import RU as FIELD_HELP_RU
 
 EN = {
+    "authentik_mode": "Authentik forward-auth mode",
+    "authentik_mode_single_application": "Single application",
+    "authentik_mode_domain_level": "Domain level",
+    "authentik_flow_hint": "Select the same mode as the Proxy Provider in Authentik. APM generates the start URL, return route and cookie forwarding automatically. Keep the Authentik portal outside its own external authentication profile.",
     "safety_title": "Safe mode",
     "safety_enabled": "Safe mode enabled",
     "safety_disabled": "Safe mode disabled",
@@ -196,6 +200,10 @@ EN = {
     "advanced": "Custom directives",
 }
 RU = {
+    "authentik_mode": "Режим forward auth в Authentik",
+    "authentik_mode_single_application": "Отдельное приложение",
+    "authentik_mode_domain_level": "Общий домен",
+    "authentik_flow_hint": "Выберите тот же режим, что у Proxy Provider в Authentik. APM автоматически создаёт адрес начала входа, маршрут возврата и передачу cookie. Сам портал Authentik не подключайте к его собственному профилю внешней авторизации.",
     "safety_title": "Безопасный режим",
     "safety_enabled": "Безопасный режим включён",
     "safety_disabled": "Безопасный режим выключен",

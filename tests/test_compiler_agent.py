@@ -32,11 +32,64 @@ def test_auth_identity_variables_fit_default_linux_hash_buckets(config):
         resource("auth-providers", provider, provider_id), resource("proxy-hosts", route),
     ]))
     variables = re.findall(r"auth_request_set \$(\w+) ", text)
-    assert len(variables) == 16 and len(set(variables)) == 16
+    assert len(variables) == 18 and len(set(variables)) == 17
     # ngx_hash_elt_t: pointer + aligned (length field + key + null), plus bucket terminator.
     assert all(8 + ((2 + len(name) + 1 + 7) // 8) * 8 + 8 <= 64 for name in variables)
     assert "proxy_ssl_server_name on;" in text
     assert 'proxy_ssl_name "auth.example.test";' in text
+
+
+@pytest.mark.parametrize("mode,prefix", [
+    ("single_application", "/outpost.goauthentik.io/start"),
+    ("domain_level", "https://auth.example.test/outpost.goauthentik.io/start"),
+])
+def test_authentik_start_callback_and_cookie_forwarding(config, mode, prefix):
+    provider_id = str(uuid.uuid4())
+    profile = AuthProvider(provider="authentik", url="https://auth.example.test", authentik_mode=mode)
+    assert profile.signin_url.endswith("/outpost.goauthentik.io/start")
+    body = Route(domains=["app.example.test"], auth_provider_id=provider_id).model_dump()
+    text = bundle_text(Compiler(config, {}, config.data_dir / "revisions/test").compile([
+        resource("auth-providers", profile.model_dump(), provider_id), resource("proxy-hosts", body),
+    ]))
+    assert f'return 302 "{prefix}?rd=$scheme://$apm_original_host$request_uri";' in text
+    assert "location ^~ /outpost.goauthentik.io/ {\nauth_request off;" in text
+    assert 'proxy_pass "https://auth.example.test/outpost.goauthentik.io/";' in text
+    assert "proxy_set_header Host $proxy_host;" in text
+    assert "proxy_set_header X-Forwarded-Host $apm_original_host;" in text
+    assert "$upstream_http_set_cookie;" in text and "add_header Set-Cookie $apm_" in text
+    assert "/login" not in text
+
+
+def test_authentik_legacy_login_url_is_not_used_as_protocol_endpoint(config):
+    provider_id = str(uuid.uuid4())
+    profile = {"provider": "authentik", "url": "https://auth.example.test",
+               "signin_url": "https://auth.example.test/login"}
+    text = bundle_text(Compiler(config, {}, config.data_dir / "revisions/test").compile([
+        resource("auth-providers", profile, provider_id),
+        resource("proxy-hosts", Route(domains=["app.example.test"], auth_provider_id=provider_id).model_dump()),
+    ]))
+    assert '/login"' not in text
+    assert 'return 302 "/outpost.goauthentik.io/start?' in text
+
+
+def test_authentik_portal_cannot_protect_itself(config):
+    provider_id = str(uuid.uuid4())
+    with pytest.raises(CompileError, match="own forward-auth"):
+        Compiler(config, {}, config.data_dir / "revisions/test").compile([
+            resource("auth-providers", AuthProvider(provider="authentik", url="https://auth.example.test").model_dump(), provider_id),
+            resource("proxy-hosts", Route(domains=["auth.example.test"], auth_provider_id=provider_id).model_dump()),
+        ])
+
+
+def test_pending_tls_authentik_has_no_unregistered_cookie_variable(config):
+    provider_id = str(uuid.uuid4())
+    text = bundle_text(Compiler(config, {}, config.data_dir / "revisions/test").compile([
+        resource("auth-providers", AuthProvider(provider="authentik", url="https://auth.example.test").model_dump(), provider_id),
+        resource("proxy-hosts", Route(domains=["app.example.test"], tls="http", acme_terms_agreed=True,
+                                     auth_provider_id=provider_id).model_dump()),
+    ]))
+    assert "return 503;" in text
+    assert "add_header Set-Cookie" not in text
 
 
 def test_tls_pending_never_exposes_plaintext_backend(config):

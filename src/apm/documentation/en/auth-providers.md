@@ -43,11 +43,11 @@ Example: `"https://auth.example.com"`.
 ### `signin_url`
 
 <!-- setting:signin_url -->
-Full external provider sign-in URL, used as the redirect destination for unauthenticated clients.
+Authentik generates its start URL automatically from authentik_mode; a manual /login is not used. Other providers require a full sign-in URL when redirect_login is enabled.
 
-Format: `string`. Default: `required`.
+Format: `string`. Default: empty; generated automatically for Authentik.
 
-Example: `"https://auth.example.com/login"`.
+Example for another provider: `"https://auth.example.com/"`.
 
 ### `redirect_login`
 
@@ -75,3 +75,11 @@ Create a clearly named resource, complete required settings and save. Confirm ap
 
 
 Identity variables use short unique names compatible with the default variables_hash_bucket_size=64 on Linux. Enabling external authentication does not require increasing the global hash bucket size. HTTPS auth_request upstreams receive their hostname as SNI.
+
+
+### `authentik_mode`
+
+<!-- setting:authentik_mode -->
+Match the Proxy Provider mode in Authentik: single_application (default) or domain_level. In single_application mode APM generates a start URL on the application domain, a public `/outpost.goauthentik.io/*` start/callback route and outpost cookie forwarding. In domain_level mode sign-in starts at the Authentik origin. The original application URL is passed in rd. Authentik signin_url is automatic and hidden in the editor; a manual `/login` is not used. Other providers still require signin_url when redirect_login is enabled.
+
+Legacy Authentik profiles default to single_application. Do not protect the Authentik portal with its own forward-auth profile; APM rejects that configuration before activation. Each virtual host supports one Authentik origin/mode. `/outpost.goauthentik.io` is reserved for protocol routes and must not be configured as a custom location. Test the complete sign-in and return flow, not just an initial 302.

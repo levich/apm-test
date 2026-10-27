@@ -43,11 +43,11 @@ HTTP(S)-origin сервиса внешней авторизации без query
 ### `signin_url`
 
 <!-- setting:signin_url -->
-Полный адрес страницы входа внешнего провайдера. Используется как цель перенаправления для неавторизованного клиента.
+Для Authentik адрес начала входа создаётся автоматически по authentik_mode; ручной /login не используется. Для остальных провайдеров задайте полный адрес страницы входа — он обязателен, если включён redirect_login.
 
-Формат: `string`. По умолчанию: `обязательно`.
+Формат: `string`. По умолчанию: пустая строка; для Authentik вычисляется автоматически.
 
-Пример: `"https://auth.example.com/login"`.
+Пример для другого провайдера: `"https://auth.example.com/"`.
 
 ### `redirect_login`
 
@@ -75,3 +75,11 @@ HTTP(S)-origin сервиса внешней авторизации без query
 
 
 Переменные identity используют короткие уникальные имена, совместимые со стандартным variables_hash_bucket_size=64 на Linux. Увеличивать глобальный hash только для включения внешней авторизации не требуется. Для HTTPS-сервиса auth_request передаётся SNI его hostname.
+
+
+### `authentik_mode`
+
+<!-- setting:authentik_mode -->
+Режим должен совпадать с Proxy Provider в Authentik: single_application (по умолчанию) либо domain_level. В single_application APM автоматически создаёт вход на домене приложения `/outpost.goauthentik.io/start`, открытый маршрут `/outpost.goauthentik.io/*` для start/callback и передачу cookie outpost. В domain_level вход начинается на origin Authentik. Исходный адрес приложения передаётся в rd. Для Authentik signin_url вычисляется автоматически и скрыт в форме; ручной `/login` не используется. Для остальных провайдеров signin_url по-прежнему нужен при включённом redirect_login.
+
+Ранее сохранённые профили Authentik без режима используют single_application. Сам портал Authentik не защищайте его собственным forward-auth; APM отклоняет такую конфигурацию до активации. На один виртуальный хост допускается один origin и режим Authentik. Префикс `/outpost.goauthentik.io` зарезервирован под маршруты протокола и не должен задаваться в дополнительных locations. Проверяйте весь цикл входа, включая возврат на приложение, а не только ответ 302.

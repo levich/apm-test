@@ -255,7 +255,8 @@ class Certificate(Strict):
 class AuthProvider(Strict):
     provider: Literal["authelia", "authentik", "oauth2proxy", "tinyauth", "voidauth", "anubis"]
     url: str
-    signin_url: str
+    signin_url: str = ""
+    authentik_mode: Literal["single_application", "domain_level"] = "single_application"
     redirect_login: bool = True
     identity_headers: list[
         Literal[
@@ -273,9 +274,21 @@ class AuthProvider(Strict):
     @field_validator("url", "signin_url")
     @classmethod
     def safe_url(cls, value):
+        if value == "":
+            return value
         if not re.fullmatch(r"https?://[^\s\"'{};$\\]+", value):
             raise ValueError("Invalid provider URL")
         return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def login_endpoint(self):
+        if not self.url:
+            raise ValueError("Authentication service URL is required")
+        if self.provider == "authentik":
+            self.signin_url = self.url + "/outpost.goauthentik.io/start"
+        elif self.redirect_login and not self.signin_url:
+            raise ValueError("Sign-in URL is required when login redirects are enabled")
+        return self
 
 
 class ClientCA(Strict):

@@ -256,15 +256,17 @@ class Compiler:
             f"location = /_apm_auth_{key} {{",
             "internal;",
             f"proxy_pass {q(endpoint)};",
+            "proxy_http_version 1.1;",
+            'proxy_set_header Connection "";',
             "proxy_ssl_server_name on;",
             f"proxy_ssl_name {q(urlsplit(profile['url']).hostname or '')};",
             "proxy_pass_request_body off;",
             'proxy_set_header Content-Length "";',
-            "proxy_set_header X-Original-URL $scheme://$http_host$request_uri;",
+            "proxy_set_header X-Original-URL $scheme://$apm_original_host$request_uri;",
             "proxy_set_header X-Original-Method $request_method;",
             "proxy_set_header X-Forwarded-For $remote_addr;",
             "proxy_set_header X-Forwarded-Proto $scheme;",
-            "proxy_set_header X-Forwarded-Host $http_host;",
+            "proxy_set_header X-Forwarded-Host $apm_original_host;",
             "proxy_set_header X-Forwarded-Uri $request_uri;",
             "}",
         ]
@@ -301,6 +303,9 @@ class Compiler:
         if auth_id:
             profile = self.ref(auth_id, "auth-providers")["data"]
             lines += [f"auth_request /_apm_auth_{key};"]
+            if profile["provider"] == "authentik":
+                cookie = ident("auth-cookie:" + parent["_id"])
+                lines.append(f"auth_request_set ${cookie} $upstream_http_set_cookie;")
             for header in identity_headers:
                 # Fit Linux's default 64-byte variables hash bucket, including hash metadata.
                 variable = ident("identity:" + key + ":" + header.lower())
@@ -369,11 +374,58 @@ class Compiler:
         if auth_id:
             lines += self.auth_location(auth_id, key)
             if profile.get("redirect_login", True):
-                lines += [f"location @apm_login_{key} {{ return 302 {q(profile['signin_url'])}; }}"]
+                if profile["provider"] == "authentik":
+                    start = (profile["url"] + "/outpost.goauthentik.io/start"
+                             if profile.get("authentik_mode", "single_application") == "domain_level"
+                             else "/outpost.goauthentik.io/start")
+                    # Only the static prefix goes through q(); these are fixed, trusted variables.
+                    target = q(start + "?rd=")[:-1] + '$scheme://$apm_original_host$request_uri"'
+                else:
+                    target = q(profile["signin_url"])
+                lines += [f"location @apm_login_{key} {{ return 302 {target}; }}"]
         return lines
+
+    def authentik(self, data):
+        ids = {part.get("auth_provider_id") or data.get("auth_provider_id")
+               for part in [data, *data.get("locations", [])]}
+        profiles = [self.ref(provider_id, "auth-providers")["data"] for provider_id in ids if provider_id]
+        profiles = [profile for profile in profiles if profile["provider"] == "authentik"]
+        if not profiles:
+            return None
+        variants = {(p["url"], p.get("authentik_mode", "single_application")) for p in profiles}
+        if len(variants) != 1:
+            raise CompileError("A host must use one Authentik origin and forward-auth mode")
+        profile = profiles[0]
+        origin = urlsplit(profile["url"])
+        if origin.hostname in data["domains"] and origin.port in (None, 80, 443):
+            raise CompileError("The Authentik portal cannot be protected by its own forward-auth profile")
+        if any(part["path"].startswith("/outpost.goauthentik.io") for part in [data, *data.get("locations", [])]):
+            raise CompileError("The /outpost.goauthentik.io path is reserved for Authentik callbacks")
+        return profile
+
+    def authentik_callback(self, profile):
+        return [
+            "location ^~ /outpost.goauthentik.io/ {",
+            "auth_request off;",
+            f"proxy_pass {q(profile['url'] + '/outpost.goauthentik.io/')};",
+            "proxy_http_version 1.1;",
+            'proxy_set_header Connection "";',
+            "proxy_ssl_server_name on;",
+            f"proxy_ssl_name {q(urlsplit(profile['url']).hostname or '')};",
+            # Preserve the upstream Host for routing through an existing auth proxy;
+            # the outpost uses X-Forwarded-Host to select the protected application.
+            "proxy_set_header Host $proxy_host;",
+            "proxy_set_header X-Original-URL $scheme://$apm_original_host$request_uri;",
+            "proxy_set_header X-Original-Method $request_method;",
+            "proxy_set_header X-Forwarded-Host $apm_original_host;",
+            "proxy_set_header X-Forwarded-Proto $scheme;",
+            "proxy_set_header X-Forwarded-For $remote_addr;",
+            "}",
+        ]
 
     def proxy(self, obj):
         data = {**obj["data"], "_id": obj["id"]}
+        authentik = self.authentik(data)
         key = ident(obj["id"])
         cert = self.certificate(data.get("certificate_id")) if data["tls"] != "off" else None
         lines = [
@@ -392,6 +444,10 @@ class Compiler:
         if data["tls"] != "off" and not cert:
             lines += ["location / { return 503; }", "}"]
             return lines
+        if authentik:
+            # Keep cookie forwarding at the same level as APM response-header policies.
+            cookie = ident("auth-cookie:" + obj["id"])
+            lines += [f"add_header Set-Cookie ${cookie} always;", "proxy_buffers 8 16k;", "proxy_buffer_size 32k;"]
         compression = data.get("compression", "off")
         if compression != "off":
             if compression != "gzip":
@@ -455,6 +511,8 @@ class Compiler:
             if data.get("geo_policy_id"):
                 loc_lines.insert(1, f"if (${key}_geo_guard = 0) {{ return 403; }}")
             lines += loc_lines
+        if authentik:
+            lines += self.authentik_callback(authentik)
         if data.get("advanced"):
             lines += ["# Administrator snippet", data["advanced"]]
         return [*lines, "}"]
@@ -490,6 +548,7 @@ class Compiler:
             http_policy.append(f"error_log {q(root / 'logs/error.log')} warn;")
         http = [
             "map $http_upgrade $apm_connection { default upgrade; '' close; }",
+            "map $http_host $apm_original_host { default $http_host; '' $host; }",
             'log_format apm escape=json \'{"time":"$time_iso8601","ip":"$apm_log_ip","host":"$host",'
             '"method":"$request_method","path":"$uri","status":$status,"bytes":$body_bytes_sent,'
             '"duration":$request_time}\';',

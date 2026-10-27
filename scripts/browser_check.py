@@ -68,6 +68,25 @@ def check_safety(page, args):
     page.unroute("**/api/v1/safety/*")
 
 
+def check_authentik_editor(page, args):
+    page.goto(args.url + "/ui/auth-providers")
+    page.locator("#create").click()
+    provider = page.locator('[data-field="provider"] select')
+    mode = page.locator('[data-field="authentik_mode"] select')
+    signin = page.locator('[data-field="signin_url"] input')
+    provider.select_option("authentik")
+    expect(mode).to_be_visible()
+    expect(mode).to_have_value("single_application")
+    expect(signin).to_be_hidden()
+    mode.select_option("domain_level")
+    expect(page.locator("#editor")).to_contain_text("start URL, return route and cookie forwarding")
+    provider.select_option("authelia")
+    expect(mode).to_be_hidden()
+    expect(signin).to_be_visible()
+    assert signin.get_attribute("required") is not None
+    page.locator("#editor-cancel").click()
+
+
 def check_logs(page, args):
     directory = args.data / "logs"
     directory.mkdir(exist_ok=True)
@@ -555,6 +574,7 @@ def main():
             page.locator("#language-switch").click()
             expect(page.locator("html")).to_have_attribute("lang", "en")
         check_safety(page, args)
+        check_authentik_editor(page, args)
         fixture_db.engine.dispose()
         assert not errors, errors
         assert not network, network

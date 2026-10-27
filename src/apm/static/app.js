@@ -120,6 +120,7 @@ const labels = {
   access_ids: t["access-lists"],
   upstream_id: t.upstreams,
   auth_provider_id: t["auth-providers"],
+  authentik_mode: t.authentik_mode,
   header_policy_id: t["header-policies"],
   tls_policy_id: t["tls-policies"],
   client_ca_id: t["client-cas"],
@@ -351,7 +352,8 @@ function buildField(key, raw, value, definitions, pools, required = false) {
   if (schema.enum) {
     const select = el("select", { class: "form-select", id: fieldId });
     for (const item of schema.enum) {
-      const option = el("option", { value: String(item), text: String(item) });
+      const option = el("option", { value: String(item),
+        text: key === "authentik_mode" ? t[`authentik_mode_${item}`] : String(item) });
       option.selected = item === value;
       select.append(option);
     }
@@ -777,6 +779,20 @@ async function editResource(resource = null) {
     fields.append(nodes[key].element);
   }
   if (page === "proxy-hosts") proxyEditor = groupProxyFields(nodes, nameInput, enabledInput, pools, resource);
+  if (page === "auth-providers") {
+    const hint = el("p", { class: "text-secondary", text: t.authentik_flow_hint });
+    fields.append(hint);
+    function updateProvider() {
+      const authentik = nodes.provider.get() === "authentik";
+      nodes.authentik_mode.element.hidden = !authentik;
+      nodes.signin_url.element.hidden = authentik;
+      nodes.signin_url.element.querySelector("input").required = !authentik && nodes.redirect_login.get();
+      hint.hidden = !authentik;
+    }
+    nodes.provider.element.querySelector("select").addEventListener("change", updateProvider);
+    nodes.redirect_login.element.querySelector("input").addEventListener("change", updateProvider);
+    updateProvider();
+  }
   if (
     ctx.role === "admin" &&
     [
