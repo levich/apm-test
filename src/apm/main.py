@@ -425,14 +425,21 @@ def create_app(config=None):
         try:
             state = agent_safety()
         except HTTPException as error:
-            if error.status_code == 503:
-                return {"available": False}
+            if error.status_code in (404, 405, 500, 502, 503, 504):
+                return {
+                    "available": False, "enabled": config.safe_apply,
+                    "timeout_seconds": config.safe_apply_timeout,
+                    "reason": "agent_upgrade_required" if error.status_code in (404, 405) else "agent_unavailable",
+                }
             raise
         public = {k: v for k, v in state.items()
                   if k not in ("token", "owner_id", "owner_session", "plans", "deadline_monotonic")}
         sync_safety(session, public)
         public["can_manage"] = authorized_trial(state, request, user)
         public["available"] = True
+        public.setdefault("enabled", config.safe_apply)
+        public.setdefault("timeout_seconds", config.safe_apply_timeout)
+        public["configuration_mismatch"] = public["enabled"] != config.safe_apply
         public["route_verified"] = (config.angie_mode == "existing"
                                     or request.headers.get("x-apm-revision") == state.get("revision_id"))
         if public["can_manage"] and state.get("status") == "awaiting_confirmation":

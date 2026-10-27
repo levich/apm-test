@@ -14,6 +14,7 @@ from apm.db import Database, Job
 
 def check_safety(page, args):
     state = {"available": True, "status": "awaiting_confirmation", "halted": False,
+             "enabled": True, "watchdog_independent": True, "timeout_seconds": 120,
              "revision_id": "11111111-1111-4111-8111-111111111111", "token": "browser-test-token-only",
              "seconds_remaining": 120, "can_manage": True, "route_verified": True,
              "checks": [{"name": "APM", "ok": True}, {"name": "Portal", "ok": True}]}
@@ -45,7 +46,7 @@ def check_safety(page, args):
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     page.screenshot(path=str(args.output / "safety-trial-mobile.png"), full_page=True)
     confirm.click()
-    expect(box).to_be_hidden()
+    expect(box).to_contain_text("Safe mode enabled")
     assert actions[-1] == ("confirm", {"revision_id": state["revision_id"], "token": state["token"]})
     state["status"] = "awaiting_confirmation"
     page.evaluate("safetyStatus()")
@@ -54,6 +55,15 @@ def check_safety(page, args):
     assert actions[-1][0] == "rollback"
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.screenshot(path=str(args.output / "safety-halted.png"), full_page=True)
+    state.update(status="applied", halted=False, enabled=False)
+    page.evaluate("safetyStatus()")
+    expect(box).to_contain_text("Safe mode disabled")
+    state.update(enabled=True, watchdog_independent=False)
+    page.evaluate("safetyStatus()")
+    expect(box).to_contain_text("independent watchdog is not running")
+    state.update(available=False, reason="agent_upgrade_required")
+    page.evaluate("safetyStatus()")
+    expect(box).to_contain_text("Update its installed package")
     page.unroute("**/api/v1/safety")
     page.unroute("**/api/v1/safety/*")
 

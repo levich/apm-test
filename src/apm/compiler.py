@@ -6,6 +6,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from apm.config import Settings
 
@@ -255,6 +256,8 @@ class Compiler:
             f"location = /_apm_auth_{key} {{",
             "internal;",
             f"proxy_pass {q(endpoint)};",
+            "proxy_ssl_server_name on;",
+            f"proxy_ssl_name {q(urlsplit(profile['url']).hostname or '')};",
             "proxy_pass_request_body off;",
             'proxy_set_header Content-Length "";',
             "proxy_set_header X-Original-URL $scheme://$http_host$request_uri;",
@@ -299,7 +302,8 @@ class Compiler:
             profile = self.ref(auth_id, "auth-providers")["data"]
             lines += [f"auth_request /_apm_auth_{key};"]
             for header in identity_headers:
-                variable = "apm_identity_" + key + "_" + header.lower().replace("-", "_")
+                # Fit Linux's default 64-byte variables hash bucket, including hash metadata.
+                variable = ident("identity:" + key + ":" + header.lower())
                 if header in profile.get("identity_headers", ["Remote-User"]):
                     lines += [
                         f"auth_request_set ${variable} $upstream_http_{header.lower().replace('-', '_')};",
@@ -481,6 +485,9 @@ class Compiler:
             "ssl_protocols TLSv1.2 TLSv1.3;",
             "ssl_session_tickets off;",
         ]
+        if existing:
+            # Scope APM errors to its virtual hosts; preserve the owner's global log policy.
+            http_policy.append(f"error_log {q(root / 'logs/error.log')} warn;")
         http = [
             "map $http_upgrade $apm_connection { default upgrade; '' close; }",
             'log_format apm escape=json \'{"time":"$time_iso8601","ip":"$apm_log_ip","host":"$host",'

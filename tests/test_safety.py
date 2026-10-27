@@ -452,3 +452,32 @@ def test_local_resume_reconciles_outcome_before_cancelling_stale_snapshots(admin
             assert session.get(Job, first["operation_id"]).status == "failed"
             assert session.get(Job, second["operation_id"]).status == "failed"
         assert not agent.safety()["halted"]
+
+
+def test_safety_status_reports_old_agent_instead_of_silently_hiding_it(admin, monkeypatch):
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(
+        lambda request: httpx.Response(404, json={"detail": "Not Found"})
+    ))
+    response = admin.get("/api/v1/safety")
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "enabled": False, "timeout_seconds": 120,
+                               "reason": "agent_upgrade_required"}
+
+
+def test_safety_status_reports_unavailable_agent(admin, monkeypatch):
+    def unavailable(request):
+        raise httpx.ConnectError("unavailable")
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(unavailable))
+    response = admin.get("/api/v1/safety")
+    assert response.status_code == 200
+    assert response.json()["reason"] == "agent_unavailable"
+
+
+def test_safety_status_uses_agent_settings_and_reports_mismatch(admin, safe_agent, monkeypatch):
+    agent, _, _ = safe_agent
+    agent.config = agent.config.model_copy(update={"safe_apply": False})
+    with bind_agent(monkeypatch, agent):
+        result = admin.get("/api/v1/safety").json()
+        assert result["available"] and not result["enabled"]
+        assert result["configuration_mismatch"]
+        assert not result["watchdog_independent"]

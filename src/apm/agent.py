@@ -375,6 +375,10 @@ class Agent:
             result["halted"] = bool(self.read_json("safety-halted.json"))
             result["active_revision"] = self.current()
             result["confirmed"] = self.read_json("receipt.json", {})
+            result["enabled"] = self.config.safe_apply
+            result["timeout_seconds"] = self.config.safe_apply_timeout
+            heartbeat = self.read_json("safety-watchdog-heartbeat.json", {})
+            result["watchdog_independent"] = heartbeat.get("checked_at", 0) > time.time() - 10
             result["seconds_remaining"] = max(0, int(min(
                 state.get("deadline", 0) - time.time(),
                 state.get("deadline_monotonic", float("inf")) - time.monotonic(),
@@ -488,9 +492,12 @@ class Agent:
                 state["failures"] = 0
             self.write_journal(state)
 
-    def watch(self, stop):
+    def watch(self, stop, independent=False):
         while not stop.wait(2):
             try:
+                if independent:
+                    atomic_write(self.config.data_dir / "run/safety-watchdog-heartbeat.json",
+                                 json.dumps({"checked_at": time.time()}).encode())
                 self.watchdog_tick()
             except Exception:
                 # The durable journal is the diagnostic source; never log raw commands.

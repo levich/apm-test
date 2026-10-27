@@ -72,3 +72,6 @@ Example: `["Remote-User", "Remote-Email", "Remote-Groups"]`.
 Create a clearly named resource, complete required settings and save. Confirm apply completion in Operations. If angie -t fails, fix settings or dependencies; the previous working configuration remains. Observers read data; administrators delete resources no longer referenced.
 
 [Operations](operations.md) · [System settings](environment.md) · [Contents](index.md)
+
+
+Identity variables use short unique names compatible with the default variables_hash_bucket_size=64 on Linux. Enabling external authentication does not require increasing the global hash bucket size. HTTPS auth_request upstreams receive their hostname as SNI.

@@ -1,3 +1,4 @@
+import re
 import uuid
 
 import pytest
@@ -5,7 +6,7 @@ from pydantic import ValidationError
 
 from apm.agent import Agent, Deployment
 from apm.compiler import CompileError, Compiler, q
-from apm.schemas import Access, Route, Stream
+from apm.schemas import Access, AuthProvider, Route, Stream
 
 
 def resource(kind, data, object_id=None, name=None):
@@ -15,6 +16,27 @@ def resource(kind, data, object_id=None, name=None):
 
 def bundle_text(bundle):
     return "\n".join([bundle.config, *bundle.files.values()])
+
+
+def test_auth_identity_variables_fit_default_linux_hash_buckets(config):
+    provider_id = str(uuid.uuid4())
+    provider = AuthProvider(provider="authentik", url="https://auth.example.test",
+                            signin_url="https://auth.example.test/login", identity_headers=[
+                                "Remote-User", "Remote-Email", "Remote-Groups",
+                                "X-Auth-Request-User", "X-Auth-Request-Email",
+                                "X-Authentik-Username", "X-Authentik-Email", "X-Authentik-Groups",
+                            ]).model_dump()
+    route = Route(domains=["app.example.test"], auth_provider_id=provider_id,
+                  locations=[{"path": "/api"}]).model_dump()
+    text = bundle_text(Compiler(config, {}, config.data_dir / "revisions/test").compile([
+        resource("auth-providers", provider, provider_id), resource("proxy-hosts", route),
+    ]))
+    variables = re.findall(r"auth_request_set \$(\w+) ", text)
+    assert len(variables) == 16 and len(set(variables)) == 16
+    # ngx_hash_elt_t: pointer + aligned (length field + key + null), plus bucket terminator.
+    assert all(8 + ((2 + len(name) + 1 + 7) // 8) * 8 + 8 <= 64 for name in variables)
+    assert "proxy_ssl_server_name on;" in text
+    assert 'proxy_ssl_name "auth.example.test";' in text
 
 
 def test_tls_pending_never_exposes_plaintext_backend(config):

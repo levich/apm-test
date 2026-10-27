@@ -83,9 +83,11 @@ def test_existing_compiler_scopes_policies_to_apm_hosts(existing):
     assert "access_log" not in globals
     assert "ssl_protocols" not in globals
     assert "server_tokens" not in globals
+    assert "error_log" not in globals
     assert "server_tokens off;" in server
     assert "ssl_protocols TLSv1.2 TLSv1.3;" in server
     assert 'logs/access.log" apm;' in server
+    assert f'error_log "{existing.config.data_dir}/logs/error.log" warn;' in server
     assert "server_name apm.test;" in server
     assert "default_server" not in http
     assert "18081" not in http

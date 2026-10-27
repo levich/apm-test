@@ -205,7 +205,7 @@ APM_DISCOVERY_ENABLED=false
 dc() { docker compose --env-file .env.existing -f compose.existing.yaml "$@"; }
 apm_data_path=/srv/apm
 
-uv sync --frozen --no-dev --no-editable
+uv sync --frozen --no-dev --no-editable --reinstall-package angie-proxy-manager
 dc config --quiet
 dc build manager
 dc run --rm --no-deps init
@@ -218,12 +218,16 @@ sudo usermod --append --groups 10001 angie
 
 ### 4.3. Установить агент
 
-В шаблоне systemd проверьте путь `/opt/apm` и зависимость от `angie.service`:
+В шаблонах systemd проверьте путь `/opt/apm` и имя сервиса `angie.service`. Агент и watchdog используют host `.venv`; замены исходников без переустановки пакета недостаточно:
 
 ```sh
 sudo install -m 644 deploy/existing/apm-agent.service /etc/systemd/system/apm-agent.service
+sudo install -m 644 deploy/existing/apm-safety-watchdog.service /etc/systemd/system/apm-safety-watchdog.service
+sudo install -d /etc/systemd/system/angie.service.d
+sudo install -m 644 deploy/existing/angie-apm-safety.conf /etc/systemd/system/angie.service.d/apm-safety.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now apm-agent
+sudo systemctl enable --now apm-safety-watchdog
 sudo systemctl status apm-agent --no-pager
 ```
 
@@ -490,9 +494,9 @@ dc up -d --no-build --wait --wait-timeout 120
 
 ```sh
 dc stop worker manager
-sudo systemctl stop apm-agent
+sudo systemctl stop apm-agent apm-safety-watchdog
 dc run --rm --no-deps manager backup
-sudo systemctl start apm-agent
+sudo systemctl start apm-agent apm-safety-watchdog
 dc up -d --no-build --wait --wait-timeout 120
 ```
 
@@ -542,17 +546,18 @@ dc up -d --no-build --wait --wait-timeout 120
 ```sh
 docker tag apm-manager:dev apm-manager:before-update
 dc stop worker manager
-sudo systemctl stop apm-agent
+sudo systemctl stop apm-agent apm-safety-watchdog
 dc run --rm --no-deps manager backup
 ```
 
 После успешной копии обновите исходники, затем:
 
 ```sh
-uv sync --frozen --no-dev --no-editable
+uv sync --frozen --no-dev --no-editable --reinstall-package angie-proxy-manager
 dc config --quiet
 dc build manager
-sudo systemctl start apm-agent
+sudo systemctl restart apm-agent
+sudo systemctl enable --now apm-safety-watchdog
 dc up -d --no-build --wait --wait-timeout 120
 ```
 
@@ -576,7 +581,7 @@ dc exec manager apm backup-password
 
 ```sh
 dc stop worker manager
-sudo systemctl stop apm-agent
+sudo systemctl stop apm-agent apm-safety-watchdog
 sudo systemctl stop angie
 dc cp "$HOME/apm-backups/BACKUP_ID.apm" "manager:${apm_data_path}/exports/BACKUP_ID.apm"
 dc run --rm --no-deps manager restore "${apm_data_path}/exports/BACKUP_ID.apm"
@@ -597,7 +602,8 @@ PY
 
 sudo /usr/sbin/angie -p /etc/angie -t -c /etc/angie/angie.conf
 sudo systemctl start angie
-sudo systemctl start apm-agent
+sudo systemctl restart apm-agent
+sudo systemctl enable --now apm-safety-watchdog
 dc up -d --no-build --wait --wait-timeout 120
 dc exec manager apm backup-password
 ```

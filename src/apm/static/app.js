@@ -1124,17 +1124,38 @@ async function operations() {
 }
 let safetyDeadline = 0;
 let safetyRefreshing = false;
+function safetyUnavailable(reason) {
+  const box = document.getElementById("safety-notice");
+  const description = reason === "agent_upgrade_required" ? t.safety_agent_upgrade : t.safety_unavailable;
+  if (document.getElementById("safety-countdown")) {
+    let warning = document.getElementById("safety-connection-warning");
+    if (!warning) { warning = el("div", { id: "safety-connection-warning" }); box.append(warning); }
+    warning.textContent = description;
+    return;
+  }
+  box.className = "alert alert-warning";
+  box.replaceChildren(el("strong", { text: t.safety_title }), el("div", { text: description }));
+}
 async function safetyStatus() {
   if (safetyRefreshing) return;
   safetyRefreshing = true;
   try {
     const state = await api("/api/v1/safety"), box = document.getElementById("safety-notice");
-    if (state.available === false) return;
+    if (state.available === false) { safetyUnavailable(state.reason); return; }
     if (state.status !== "awaiting_confirmation" && !state.halted) {
-      box.classList.add("d-none");
+      safetyDeadline = 0;
+      const enabled = state.enabled !== false;
+      box.className = `alert ${enabled && state.watchdog_independent ? "alert-success" : "alert-warning"}`;
+      const details = [el("strong", { text: enabled ? t.safety_enabled : t.safety_disabled })];
+      if (enabled) details.push(el("div", {
+        text: t.safety_ready.replace("{seconds}", state.timeout_seconds || 120),
+      }));
+      if (enabled && !state.watchdog_independent) details.push(el("div", { text: t.safety_watchdog_missing }));
+      if (state.configuration_mismatch) details.push(el("div", { text: t.safety_configuration_mismatch }));
+      box.replaceChildren(...details);
       return;
     }
-    box.classList.remove("d-none");
+    box.className = "alert alert-warning";
     if (state.halted) {
       safetyDeadline = 0;
       box.replaceChildren(el("strong", { text: t.safety_halted }), el("div", { text: t.safety_recovery }));
@@ -1145,6 +1166,9 @@ async function safetyStatus() {
     const checks = (state.checks || []).map((check) => el("div", {
       text: `${check.name}: ${check.ok ? t.safety_passed : t.safety_failed}`,
     }));
+    checks.push(...(state.baseline || []).filter((check) => !check.ok).map((check) => el("div", {
+      text: `${check.name}: ${t.safety_baseline_unavailable}`,
+    })));
     const actions = [];
     if (state.can_manage && state.token) {
       const action = async (name) => {
@@ -1163,7 +1187,7 @@ async function safetyStatus() {
       el("div", { class: "mt-2" }, actions));
     updateSafetyCountdown();
   } catch (_) {
-    // Keep the previous countdown visible while the proxy or manager is unavailable.
+    safetyUnavailable("agent_unavailable");
   } finally {
     safetyRefreshing = false;
   }

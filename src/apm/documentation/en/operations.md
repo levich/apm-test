@@ -18,3 +18,6 @@ Checks establish a baseline before activation. Previously failing additional che
 Warnings from angie -t with exit code 0 do not block activation and appear in operations and the JSON API. Known warnings have safe descriptions and, when available, a revision file/line. Arbitrary stderr is never persisted because it can contain secrets. Unknown warnings require local error.log inspection or a manual angie -t. Nonzero exit codes reject the configuration before switching.
 
 In existing mode, recovery covers APM includes; the owner's root configuration is outside rollback. The panel check uses APM_PUBLIC_URL/health/live with normal TLS verification. Local checks cannot replace external DNS, firewall and client reachability checks.
+
+
+The safe-mode indicator is always visible: enabled/disabled, agent availability and the independent watchdog. An old agent reports that it needs an update rather than silently hiding status. Replacing the checkout is insufficient for existing installations: reinstall the package in the host .venv, restart apm-agent and apm-safety-watchdog, and rebuild containers from the same sources.

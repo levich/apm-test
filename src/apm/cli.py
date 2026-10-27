@@ -246,7 +246,7 @@ def safety_watchdog():
             agent.recover()
         except RuntimeError:
             pass
-    agent.watch(threading.Event())
+    agent.watch(threading.Event(), independent=True)
 
 
 @app.command()

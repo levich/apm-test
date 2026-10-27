@@ -22,7 +22,9 @@ Search checks the last 4 MiB, up to 10,000 records, of the **current** file, the
 
 ## Storage and existing installations
 
-Managed Angie writes errors at `warn` level and above to `APM_DATA_DIR/logs/error.log`. Existing installations retain the host's logging policy: manually point the required `error_log` to this shared directory to view it in the panel. APM access logs cover its virtual hosts.
+Managed Angie writes errors at `warn` level and above to `APM_DATA_DIR/logs/error.log`. Existing mode also sends errors from APM virtual hosts to this shared file, preserving the global error_log and other sites' logs. The file appears when host configuration is successfully validated and applied. Enable access logs separately in Server settings; without a runtime resource they are disabled. The panel reads the shared data directory, not the host's `/var/log/angie`.
+
+Root configuration, startup and server-wide errors remain in Angie's system log. An administrator can additionally point the relevant global error_log to the shared directory to view those messages in the panel. APM access logs cover only its virtual hosts.
 
 Rotation renames files above 20 MB and asks the agent to reopen logs. Cleanup uses `APM_METRICS_RETENTION_DAYS`. Administrative actions are in [Audit](audit.md); configuration application is in [Operations](operations.md).
 
