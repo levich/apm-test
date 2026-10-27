@@ -50,7 +50,7 @@ async function api(path, options = {}) {
 function badge(value) {
   const success = ["succeeded", "applied", "ready", "manual", "up", "valid"].includes(value);
   return el("span", {
-    class: `badge ${success ? "bg-green-lt" : ["failed", "error", "rollback_failed", "down", "expired", "key_mismatch", "invalid_files", "domain_mismatch", "not_yet_valid"].includes(value) ? "bg-red-lt" : ["partial", "expiring", "pending", "running"].includes(value) ? "bg-yellow-lt" : "bg-secondary-lt"}`,
+    class: `badge ${success ? "bg-green-lt" : ["failed", "error", "rollback_failed", "down", "expired", "key_mismatch", "invalid_files", "domain_mismatch", "not_yet_valid"].includes(value) ? "bg-red-lt" : ["partial", "expiring", "pending", "running", "awaiting_confirmation"].includes(value) ? "bg-yellow-lt" : "bg-secondary-lt"}`,
     text: t[`state_${value}`] || t[value] || value,
   });
 }
@@ -1113,12 +1113,67 @@ async function operations() {
         new Date(job.created_at * 1000).toLocaleString(),
         el("div", {}, [el("div", { text: job.message }),
           job.next_step ? el("div", { class: "text-secondary", text: job.next_step }) : null,
+          ...(job.warnings || []).map((warning) => el("div", { class: "text-warning",
+            text: `${job.warnings_label}: ${warning.message}${warning.file ? ` · ${warning.file}:${warning.line}` : ""}` })),
           el("details", { class: "operation-technical" }, [el("summary", { text: t.technical_details }),
             el("small", { text: `${job.kind} · ${job.id}${job.error ? ` · ${job.error}` : ""}` })]),
         ]),
       ]),
     ),
   );
+}
+let safetyDeadline = 0;
+let safetyRefreshing = false;
+async function safetyStatus() {
+  if (safetyRefreshing) return;
+  safetyRefreshing = true;
+  try {
+    const state = await api("/api/v1/safety"), box = document.getElementById("safety-notice");
+    if (state.available === false) return;
+    if (state.status !== "awaiting_confirmation" && !state.halted) {
+      box.classList.add("d-none");
+      return;
+    }
+    box.classList.remove("d-none");
+    if (state.halted) {
+      safetyDeadline = 0;
+      box.replaceChildren(el("strong", { text: t.safety_halted }), el("div", { text: t.safety_recovery }));
+      return;
+    }
+    safetyDeadline = Date.now() + state.seconds_remaining * 1000;
+    const countdown = el("strong", { id: "safety-countdown" });
+    const checks = (state.checks || []).map((check) => el("div", {
+      text: `${check.name}: ${check.ok ? t.safety_passed : t.safety_failed}`,
+    }));
+    const actions = [];
+    if (state.can_manage && state.token) {
+      const action = async (name) => {
+        await api(`/api/v1/safety/${name}`, { method: "POST", body: JSON.stringify({
+          revision_id: state.revision_id, token: state.token,
+        }) });
+        await safetyStatus();
+        await load();
+      };
+      const confirm = button(t.safety_confirm, () => action("confirm"), true);
+      confirm.disabled = !state.route_verified || !(state.checks || []).every((check) => check.ok);
+      actions.push(confirm, text(" "), button(t.safety_rollback, () => action("rollback")));
+      if (!state.route_verified) checks.push(el("div", { text: t.safety_open_panel }));
+    }
+    box.replaceChildren(el("div", {}, [text(t.safety_trial + " "), countdown]), ...checks,
+      el("div", { class: "mt-2" }, actions));
+    updateSafetyCountdown();
+  } catch (_) {
+    // Keep the previous countdown visible while the proxy or manager is unavailable.
+  } finally {
+    safetyRefreshing = false;
+  }
+}
+function updateSafetyCountdown() {
+  const node = document.getElementById("safety-countdown");
+  if (node) {
+    const seconds = Math.max(0, Math.ceil((safetyDeadline - Date.now()) / 1000));
+    node.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
 }
 async function users() {
   const rows = await api("/api/v1/users");
@@ -1586,6 +1641,9 @@ document
     }
   });
 load();
+safetyStatus();
+setInterval(safetyStatus, 5000);
+setInterval(updateSafetyCountdown, 1000);
 if (["proxy-hosts", "certificates", "operations"].includes(page)) {
   let refreshing = false;
   setInterval(async () => {

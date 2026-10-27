@@ -6,6 +6,13 @@ TEXT = {
         "running": "Выполняется",
         "succeeded": "Завершено",
         "failed": "Ошибка",
+        "awaiting_confirmation": "Ожидает подтверждения",
+        "trial": "Изменения применены временно. Подтвердите доступ до истечения таймера или выполните откат.",
+        "warnings": "Предупреждения Angie",
+        "conflicting_server_name": "Конфликт server_name: один из виртуальных хостов может быть проигнорирован.",
+        "protocol_options_redefined": "Параметры протокола повторно заданы для одного listener.",
+        "deprecated_directive": "В конфигурации используется устаревшая директива.",
+        "angie_warning": "Angie сообщил предупреждение. Подробности доступны в локальном error.log.",
         "apply": "Применение изменений",
         "certificate.issue": "Выпуск сертификата",
         "certificate.renew": "Перевыпуск сертификата",
@@ -42,6 +49,13 @@ TEXT = {
         "running": "Running",
         "succeeded": "Completed",
         "failed": "Failed",
+        "awaiting_confirmation": "Awaiting confirmation",
+        "trial": "Changes are temporarily active. Confirm access before the deadline or roll back.",
+        "warnings": "Angie warnings",
+        "conflicting_server_name": "Conflicting server_name: a virtual host may be ignored.",
+        "protocol_options_redefined": "Protocol options were redefined for a listener.",
+        "deprecated_directive": "The configuration uses a deprecated directive.",
+        "angie_warning": "Angie reported a warning. Inspect the local error.log for details.",
         "apply": "Apply configuration changes",
         "certificate.issue": "Issue certificate",
         "certificate.renew": "Reissue certificate",
@@ -85,6 +99,8 @@ def present(job, language="en"):
         title += " «" + context["name"] + "»"
     message = t["waiting"] if job.status == "pending" else t["working"]
     next_step = None
+    if job.status == "awaiting_confirmation":
+        message = t["trial"]
     if job.status == "succeeded":
         message = (
             t["applied"]
@@ -121,4 +137,7 @@ def present(job, language="en"):
         "message": message,
         "next_step": next_step,
         "subject": context,
+        "warnings_label": t["warnings"],
+        "warnings": [{**item, "message": t.get(item.get("code"), t["angie_warning"])}
+                     for item in job.result.get("warnings", [])],
     }

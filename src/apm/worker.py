@@ -11,7 +11,7 @@ from apm.compiler import Compiler
 from apm.config import Settings
 from apm.db import Database, Job, Resource, Revision, State, now, state_get, state_set
 from apm.security import Vault
-from apm.services import audit
+from apm.services import sync_safety
 
 logger = logging.getLogger("apm.worker")
 
@@ -41,7 +41,9 @@ class Worker:
     def claim(self):
         with self.db.session() as s:
             query = select(Job).where(Job.status == "pending", Job.available_at <= now())
-            if state_get(s, "apply_halted", {}).get("halted"):
+            if (state_get(s, "apply_halted", {}).get("halted")
+                or (self.config.data_dir / "run/safety-halted.json").exists()
+                or (self.config.data_dir / "run/apply-journal.json").exists()):
                 query = query.where(Job.kind != "apply")
             job = s.scalar(query.order_by(Job.sequence).limit(1))
             if not job:
@@ -93,8 +95,13 @@ class Worker:
             self.config.data_dir / "revisions" / revision_id,
             lambda obj: self.vault.decrypt(obj["encrypted_secret"]) if obj.get("encrypted_secret") else {},
         ).compile(snapshot)
-        data = {"revision_id": revision_id, "configuration": bundle.config, "files": bundle.files}
+        data = {"revision_id": revision_id, "configuration": bundle.config, "files": bundle.files,
+                **{key: payload[key] for key in ("confirmation", "owner_id", "owner_session") if key in payload}}
         validation = self.http.post("/validate", json=data)
+        with self.db.session() as s:
+            job = s.scalar(select(Job).where(Job.kind == "apply", Job.status == "running"))
+            if job:
+                job.result = {"warnings": validation.json().get("warnings", [])}
         if validation.is_error:
             raise ValueError(validation.json().get("detail", "Configuration validation failed"))
         with self.db.session() as s:
@@ -108,12 +115,20 @@ class Worker:
             raise ValueError(detail)
         result = response.json()
         with self.db.session() as s:
-            revision = s.get(Revision, revision_id)
-            revision.status = "applied"
-            revision.generation = result["generation"]
-            state_set(s, "applied", result)
-            audit(s, "worker", "revision.applied", revision_id, generation=result["generation"])
+            sync_safety(s, result)
         return result
+
+    def sync_safety(self):
+        try:
+            response = self.http.get("/safety", timeout=3)
+            response.raise_for_status()
+            # Never persist the Unix endpoint's private owner/token metadata.
+            result = {k: v for k, v in response.json().items()
+                      if k not in ("token", "owner_id", "owner_session", "plans", "deadline_monotonic")}
+            with self.db.session() as session:
+                sync_safety(session, result)
+        except (httpx.HTTPError, ValueError):
+            pass
 
     def execute(self, kind, payload):
         if kind == "geoip.update":
@@ -178,6 +193,7 @@ class Worker:
         raise ValueError(f"Unknown job kind: {kind}")
 
     def tick(self):
+        self.sync_safety()
         job_id = self.claim()
         if not job_id:
             return False
@@ -188,7 +204,8 @@ class Worker:
             result = self.execute(kind, payload)
             with self.db.session() as s:
                 row = s.get(Job, job_id)
-                row.status, row.result = "succeeded", result or {}
+                if row.status == "running":
+                    row.status, row.result = "succeeded", result or {}
                 row.updated_at = now()
         except Exception as error:
             # Do not log exception repr: HTTP errors can embed tokens and request URLs.

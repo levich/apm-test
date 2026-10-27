@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
+import httpx
 import pyotp
 from authlib.integrations.starlette_client import OAuth
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
@@ -41,6 +42,7 @@ from apm.services import (
     require_role,
     save_resource,
     serialize,
+    sync_safety,
 )
 
 PACKAGE = Path(__file__).parent
@@ -110,6 +112,7 @@ def create_app(config=None):
         if not login or login.expires_at <= now() or not user or not user.enabled or not login.authenticated:
             raise HTTPException(401, "Authentication required")
         request.state.login = login
+        session.info["apply_owner"] = {"owner_id": user.id, "owner_session": login.token_hash}
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             if not secrets.compare_digest(request.headers.get("x-csrf-token", ""), login.csrf):
                 raise HTTPException(403, "Invalid CSRF token")
@@ -399,6 +402,59 @@ def create_app(config=None):
             }
             for r in session.scalars(select(Revision).order_by(Revision.created_at.desc()).limit(100))
         ]
+
+    def agent_safety(path="/safety", body=None):
+        try:
+            with httpx.Client(transport=httpx.HTTPTransport(uds=str(config.socket)),
+                              base_url="http://agent", timeout=30, trust_env=False) as client:
+                response = client.get(path, timeout=3) if body is None else client.post(path, json=body)
+                if response.is_error:
+                    raise HTTPException(response.status_code, response.json().get("detail", "Agent error"))
+                return response.json()
+        except httpx.HTTPError as error:
+            raise HTTPException(503, "Agent unavailable; the local rollback timer remains active") from error
+
+    def authorized_trial(state, request, user):
+        return user.role == "admin" or (
+            user.role == "operator" and state.get("owner_id") == user.id
+            and state.get("owner_session") == request.state.login.token_hash
+        )
+
+    @app.get("/api/v1/safety")
+    def safety_status(request: Request, user=Depends(current), session=Depends(db)):
+        try:
+            state = agent_safety()
+        except HTTPException as error:
+            if error.status_code == 503:
+                return {"available": False}
+            raise
+        public = {k: v for k, v in state.items()
+                  if k not in ("token", "owner_id", "owner_session", "plans", "deadline_monotonic")}
+        sync_safety(session, public)
+        public["can_manage"] = authorized_trial(state, request, user)
+        public["available"] = True
+        public["route_verified"] = (config.angie_mode == "existing"
+                                    or request.headers.get("x-apm-revision") == state.get("revision_id"))
+        if public["can_manage"] and state.get("status") == "awaiting_confirmation":
+            public["token"] = state.get("token")
+        return public
+
+    @app.post("/api/v1/safety/{action}")
+    def safety_action(action: str, data: dict, request: Request, user=Depends(current), session=Depends(db)):
+        if action not in ("confirm", "rollback"):
+            raise HTTPException(404)
+        state = agent_safety()
+        if not authorized_trial(state, request, user):
+            raise HTTPException(403, "Only the initiating operator session or an administrator can manage this trial")
+        if (action == "confirm" and config.angie_mode == "managed"
+            and request.headers.get("x-apm-revision") != state.get("revision_id")):
+            raise HTTPException(409, "Open the panel through the candidate Angie configuration before confirming")
+        result = agent_safety("/safety/" + action, {
+            "revision_id": data.get("revision_id"), "token": data.get("token"),
+        })
+        sync_safety(session, result)
+        audit(session, user, "safety." + action, result.get("revision_id"))
+        return result
 
     @app.post("/api/v1/revisions/apply")
     def apply_current(user=Depends(admin), session=Depends(db)):

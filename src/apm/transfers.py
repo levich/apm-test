@@ -411,7 +411,8 @@ def restore(archive: Path, destination: Path, password: str):
         with sqlite3.connect(staging / "apm.sqlite3") as connection:
             connection.execute("DELETE FROM sessions")
             connection.execute(
-                "UPDATE jobs SET status='failed', error='Interrupted by restore' WHERE status IN ('pending','running')"
+                "UPDATE jobs SET status='failed', error='Interrupted by restore' "
+                "WHERE status IN ('pending','running','awaiting_confirmation')"
             )
             connection.execute(
                 "DELETE FROM state WHERE key IN ('applied','apply_halted','agent_status','capabilities')"

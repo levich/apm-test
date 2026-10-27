@@ -35,6 +35,7 @@
       {% if page=='users' and user.role=='admin' %}<button id="create-user" class="btn btn-primary">＋ {{ t.create }}</button>{% endif %}
     </div></div>
     <div id="notice" class="alert d-none" role="status"></div>
+    <div id="safety-notice" class="alert alert-warning d-none" role="status" aria-live="polite"></div>
     <div id="content" aria-live="polite">{% if page=='documentation' %}{% include 'documentation.html' %}{% else %}<div class="card"><div class="card-body text-secondary">{{ t.loading }}</div></div>{% endif %}</div>
     {% if page=='dashboard' %}<div class="mt-4" hx-get="/fragments/operations" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>{% endif %}
   </div>

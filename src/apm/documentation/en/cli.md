@@ -98,3 +98,21 @@ Read-only Docker gateway; --host 0.0.0.0, --port 2375. Only required discovery r
 <!-- option:gateway.host -->
 <!-- option:gateway.port -->
 
+
+
+## `apm safety-status`
+
+<!-- command:safety-status -->
+Read the local trial/rollback status without a working panel, worker or agent Unix API. The confirmation token is never printed.
+
+## `apm safety-rollback`
+
+<!-- command:safety-rollback -->
+Restore the confirmed revision from an outstanding journal, including after a failed automatic rollback. Requires local Angie administration privileges. Further applies remain paused.
+
+## `apm safety-watchdog`
+
+<!-- command:safety-watchdog -->
+Independent deadline and route-check process. Included as an s6 service; existing installations must also install deploy/existing/apm-safety-watchdog.service alongside apm-agent.service. Recovery starts without HTTP/status API access; confirming recovery still requires a working status API.
+
+After recovery, apm resume-applies cancels stale pending applies to prevent replaying rejected settings. Review the desired settings and save again.

@@ -12,6 +12,52 @@ from apm.config import Settings
 from apm.db import Database, Job
 
 
+def check_safety(page, args):
+    state = {"available": True, "status": "awaiting_confirmation", "halted": False,
+             "revision_id": "11111111-1111-4111-8111-111111111111", "token": "browser-test-token-only",
+             "seconds_remaining": 120, "can_manage": True, "route_verified": True,
+             "checks": [{"name": "APM", "ok": True}, {"name": "Portal", "ok": True}]}
+    actions = []
+    page.route("**/api/v1/safety", lambda route: route.fulfill(json=state))
+    def finish(route):
+        actions.append((route.request.url.rsplit("/", 1)[-1], route.request.post_data_json))
+        state["status"] = "applied" if actions[-1][0] == "confirm" else "rolled_back"
+        state["halted"] = actions[-1][0] == "rollback"
+        route.fulfill(json={"status": state["status"]})
+    page.route("**/api/v1/safety/*", finish)
+    page.goto(args.url + "/ui/operations")
+    box = page.locator("#safety-notice")
+    confirm = box.get_by_role("button", name="Confirm access", exact=True)
+    expect(confirm).to_be_enabled()
+    expect(page.locator("#safety-countdown")).to_contain_text(":")
+    state["checks"][1]["ok"] = False
+    page.evaluate("safetyStatus()")
+    expect(confirm).to_be_disabled()
+    state["checks"][1]["ok"] = True
+    state["route_verified"] = False
+    page.evaluate("safetyStatus()")
+    expect(confirm).to_be_disabled()
+    expect(box).to_contain_text("candidate Angie listener")
+    state["route_verified"] = True
+    page.evaluate("safetyStatus()")
+    expect(confirm).to_be_enabled()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(args.output / "safety-trial-mobile.png"), full_page=True)
+    confirm.click()
+    expect(box).to_be_hidden()
+    assert actions[-1] == ("confirm", {"revision_id": state["revision_id"], "token": state["token"]})
+    state["status"] = "awaiting_confirmation"
+    page.evaluate("safetyStatus()")
+    box.get_by_role("button", name="Roll back now", exact=True).click()
+    expect(box).to_contain_text("applies are paused")
+    assert actions[-1][0] == "rollback"
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.screenshot(path=str(args.output / "safety-halted.png"), full_page=True)
+    page.unroute("**/api/v1/safety")
+    page.unroute("**/api/v1/safety/*")
+
+
 def check_logs(page, args):
     directory = args.data / "logs"
     directory.mkdir(exist_ok=True)
@@ -493,11 +539,17 @@ def main():
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.screenshot(path=str(args.output / "documentation-mobile.png"), full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 1000})
+        page.goto(args.url + "/ui/operations")
+        if page.locator("html").get_attribute("lang") != "en":
+            page.locator("#language-switch").click()
+            expect(page.locator("html")).to_have_attribute("lang", "en")
+        check_safety(page, args)
         fixture_db.engine.dispose()
         assert not errors, errors
         assert not network, network
         print(
-            "Browser checks passed: Angie access/error logs, search/filters/pagination/auto refresh, proxy links/availability, backend TLS verification/SNI persistence, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
+            "Browser checks passed: safety countdown/confirmation/rollback, required checks and route identity, Angie access/error logs, search/filters/pagination/auto refresh, proxy links/availability, backend TLS verification/SNI persistence, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
         )
         browser.close()
 

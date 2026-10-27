@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from apm.safety import SafetyCheck
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="APM_", env_file=".env", extra="ignore")
@@ -19,6 +21,9 @@ class Settings(BaseSettings):
     angie_status_url: str = "http://127.0.0.1:18081/status/angie"
     backend_url: str = "http://127.0.0.1:8181"
     admin_listen: str = "0.0.0.0:81"
+    safe_apply: bool = True
+    safe_apply_timeout: int = 120
+    safe_apply_checks: list[SafetyCheck] = []
     default_language: str = "ru"
     docker_url: str = "http://docker-gateway:2375"
     discovery_enabled: bool = False
@@ -39,6 +44,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def existing_angie_paths(self):
+        if not 30 <= self.safe_apply_timeout <= 600:
+            raise ValueError("APM_SAFE_APPLY_TIMEOUT must be between 30 and 600 seconds")
+        if len(self.safe_apply_checks) > 32:
+            raise ValueError("At most 32 APM_SAFE_APPLY_CHECKS are allowed")
+        names = [check.name for check in self.safe_apply_checks]
+        if "APM" in names or len(names) != len(set(names)):
+            raise ValueError("Safe apply check names must be unique; APM is reserved for the panel")
         if self.angie_mode == "existing":
             for name in ("data_dir", "angie_config", "angie_prefix"):
                 path = getattr(self, name)

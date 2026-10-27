@@ -4,6 +4,15 @@ from apm.field_help import PAGES_RU as FIELD_HELP_PAGES_RU
 from apm.field_help import RU as FIELD_HELP_RU
 
 EN = {
+    "safety_trial": "Changes are temporarily active. Automatic rollback in",
+    "safety_confirm": "Confirm access",
+    "safety_rollback": "Roll back now",
+    "safety_halted": "Configuration applies are paused.",
+    "safety_recovery": "The previous configuration was restored, or requires local recovery. Review the rejected settings, run apm safety-status and apm resume-applies on the server, then save again.",
+    "safety_open_panel": "Open the panel through the candidate Angie listener to confirm access.",
+    "safety_passed": "passed",
+    "safety_failed": "failed",
+    "state_awaiting_confirmation": "Awaiting confirmation",
     "app": "Angie Proxy Manager",
     "dashboard": "Overview",
     "proxy-hosts": "Proxy hosts",
@@ -178,6 +187,15 @@ EN = {
     "advanced": "Custom directives",
 }
 RU = {
+    "safety_trial": "Изменения применены временно. Автоматический откат через",
+    "safety_confirm": "Подтвердить доступ",
+    "safety_rollback": "Откатить сейчас",
+    "safety_halted": "Применение конфигураций приостановлено.",
+    "safety_recovery": "Прежняя конфигурация восстановлена либо требует локального восстановления. Исправьте отклонённые настройки, выполните apm safety-status и apm resume-applies на сервере, затем сохраните снова.",
+    "safety_open_panel": "Для подтверждения откройте панель через listener новой конфигурации Angie.",
+    "safety_passed": "успешно",
+    "safety_failed": "ошибка",
+    "state_awaiting_confirmation": "Ожидает подтверждения",
     **EN,
     "logs": "Журналы Angie",
     "log_source": "Журнал",

@@ -7,7 +7,7 @@ from apm.main import create_app
 
 @pytest.fixture
 def config(tmp_path):
-    value = Settings(data_dir=tmp_path / "data", cookie_secure=True)
+    value = Settings(data_dir=tmp_path / "data", cookie_secure=True, safe_apply=False)
     value.prepare()
     return value
 

@@ -22,7 +22,8 @@ def existing(tmp_path):
         f"stream {{\ninclude {data}/current/stream.conf;\n}}\n"
     )
     config = Settings(
-        _env_file=None, data_dir=data, angie_mode="existing", angie_config=root, angie_prefix=tmp_path
+        _env_file=None, data_dir=data, angie_mode="existing", angie_config=root, angie_prefix=tmp_path,
+        safe_apply=False,
     )
     agent = Agent(config)
     agent.initialize()

@@ -126,7 +126,8 @@ def main():
     threading.Thread(target=udp_echo, daemon=True).start()
     with tempfile.TemporaryDirectory(prefix="angie-test-", dir=args.work) as temporary:
         root = Path(temporary)
-        config = Settings(data_dir=root, angie_binary=args.binary, admin_listen="127.0.0.1:18182")
+        config = Settings(data_dir=root, angie_binary=args.binary, admin_listen="127.0.0.1:18182",
+                          safe_apply=False)
         agent = Agent(config)
         caps = agent.capabilities()
         assert caps["available"], caps

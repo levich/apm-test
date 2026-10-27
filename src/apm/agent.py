@@ -3,13 +3,17 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
 from cryptography import x509
@@ -17,10 +21,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from apm.compiler import Compiler, q
 from apm.config import Settings
+from apm.safety import SafetyCheck, check_routes, warnings
 from apm.security import atomic_write, digest
 
 
@@ -61,6 +68,24 @@ class Deployment(BaseModel):
     revision_id: uuid.UUID
     configuration: str = Field(max_length=2_000_000)
     files: dict[str, str] = {}
+    confirmation: Literal["manual", "automatic"] = "automatic"
+    owner_id: str = ""
+    owner_session: str = ""
+
+
+class SafetyConflict(ValueError):
+    pass
+
+
+class Confirmation(BaseModel):
+    revision_id: uuid.UUID
+    token: str = Field(min_length=20, max_length=128)
+
+
+class AngieCommandError(ValueError):
+    def __init__(self, code, output):
+        super().__init__(f"Angie command failed (exit {code}); inspect the local error log")
+        self.warnings = warnings(output)
 
 
 class Agent:
@@ -84,7 +109,7 @@ class Agent:
         )
         if result.returncode:
             # Configuration diagnostics can contain credentials. Do not persist stderr.
-            raise ValueError(f"Angie command failed (exit {result.returncode}); inspect the local error log")
+            raise AngieCommandError(result.returncode, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
     def capabilities(self):
@@ -198,6 +223,11 @@ class Agent:
         tmp = self.config.data_dir / f".current-{uuid.uuid4().hex}"
         tmp.symlink_to(target)
         os.replace(tmp, link)
+        directory_fd = os.open(self.config.data_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     def current(self):
         path = self.config.data_dir / "current"
@@ -206,7 +236,10 @@ class Agent:
     def stage(self, deployment: Deployment):
         rid = str(deployment.revision_id)
         directory = self.config.data_dir / "revisions" / rid
-        payload_hash = digest(json.dumps(deployment.model_dump(mode="json"), sort_keys=True))
+        # Keep the original bundle hash independent of confirmation/session metadata.
+        payload_hash = digest(json.dumps(deployment.model_dump(
+            mode="json", include={"revision_id", "configuration", "files"}
+        ), sort_keys=True))
         if directory.exists():
             if (directory / "manifest.json").exists() and json.loads(
                 (directory / "manifest.json").read_text()
@@ -239,6 +272,18 @@ class Agent:
 
     def initialize(self):
         with self.lock():
+            # Cold boot must start Angie with the confirmed files, never a pending candidate.
+            journal = self.config.data_dir / "run/apply-journal.json"
+            if journal.exists():
+                state = json.loads(journal.read_text())
+                receipt = self.read_json("receipt.json", {})
+                if receipt.get("revision_id") == state.get("candidate") and self.current() == state["candidate"]:
+                    journal.unlink()
+                else:
+                    if state.get("previous"):
+                        self.switch(state["previous"])
+                    state.update(status="rolling_back", reason="restart")
+                    self.write_journal(state)
             if self.config.angie_mode == "existing":
                 if not self.config.root_config.is_file():
                     raise ValueError("Existing Angie configuration does not exist")
@@ -263,8 +308,7 @@ class Agent:
 
     def validate(self, directory):
         if self.config.angie_mode != "existing":
-            self.command("-t", "-c", str(directory / "angie.conf"))
-            return
+            return warnings(self.command("-t", "-c", str(directory / "angie.conf")))
         source = self.config.root_config.read_text()
         for name in ("http.conf", "stream.conf"):
             if not (directory / name).is_file():
@@ -288,14 +332,15 @@ class Agent:
         ) as candidate:
             candidate.write(source)
             candidate.flush()
-            self.command("-t", "-c", candidate.name)
+            return warnings(self.command("-t", "-c", candidate.name))
 
     def reload(self, before):
         self.command("-s", "reload", "-c", str(self.config.root_config))
-        for _ in range(50):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
             try:
                 generation = self.generation()
-                if generation > before:
+                if before is None or generation > before:
                     # Successful HTTP status confirms that new workers serve requests.
                     return generation
             except (httpx.HTTPError, ValueError):
@@ -303,54 +348,243 @@ class Agent:
             time.sleep(0.1)
         raise ValueError("Reload was not confirmed by the status API")
 
-    def recover(self):
-        journal = self.config.data_dir / "run/apply-journal.json"
-        if not journal.exists():
-            return
-        state = json.loads(journal.read_text())
-        previous = state.get("previous")
-        if previous:
-            before = self.generation()
+    def read_json(self, name, default=None):
+        path = self.config.data_dir / "run" / name
+        return json.loads(path.read_text()) if path.exists() else default
+
+    def write_journal(self, state):
+        atomic_write(self.config.data_dir / "run/apply-journal.json", json.dumps(state).encode())
+
+    def public_state(self, state):
+        return {k: v for k, v in state.items()
+                if k not in ("token", "owner_id", "owner_session", "plans", "deadline_monotonic")}
+
+    def record(self, state):
+        public = self.public_state(state)
+        atomic_write(self.config.data_dir / "run/safety-status.json", json.dumps(public).encode(), 0o640)
+        atomic_write(
+            self.config.data_dir / "run/receipts" / (state["revision_id"] + ".json"),
+            json.dumps(public).encode(), 0o640,
+        )
+        return public
+
+    def safety(self, private=False):
+        with self.lock():
+            state = self.read_json("apply-journal.json") or self.read_json("safety-status.json", {})
+            result = dict(state) if private else self.public_state(state)
+            result["halted"] = bool(self.read_json("safety-halted.json"))
+            result["active_revision"] = self.current()
+            result["confirmed"] = self.read_json("receipt.json", {})
+            result["seconds_remaining"] = max(0, int(min(
+                state.get("deadline", 0) - time.time(),
+                state.get("deadline_monotonic", float("inf")) - time.monotonic(),
+            )))
+            return result
+
+    def plans(self, revision_id):
+        checks = list(self.config.safe_apply_checks)
+        public = urlsplit(self.config.public_url)
+        if self.config.angie_mode == "managed":
+            host, port = self.config.admin_listen.rsplit(":", 1)
+            host = host.strip("[]")
+            host = "127.0.0.1" if host in ("", "*", "0.0.0.0") else "::1" if host == "::" else host
+            panel = SafetyCheck(
+                name="APM", host=host, port=int(port), path="/health/live",
+                server_name="localhost", host_header=public.netloc or "localhost",
+                ca_file=str(self.config.data_dir / "bootstrap/fullchain.pem"),
+                body_contains='"status":"ok"', revision=revision_id,
+            )
+        else:
+            panel = SafetyCheck(
+                name="APM", scheme=public.scheme, host=public.hostname or "localhost",
+                port=public.port or (443 if public.scheme == "https" else 80),
+                path=public.path.rstrip("/") + "/health/live", body_contains='"status":"ok"',
+            )
+        return [panel, *checks]
+
+    def run_checks(self, state, attempts=1):
+        plans = [SafetyCheck.model_validate(check) for check in state.get("plans", [])]
+        return self.probe_plans(plans, attempts)
+
+    def probe_plans(self, plans, attempts=1):
+        for attempt in range(attempts):
+            checks = check_routes(plans)
+            if all(check["ok"] for check in checks):
+                return checks
+            if attempt + 1 < attempts:
+                time.sleep(0.2)
+        return checks
+
+    def expired(self, state):
+        return (time.time() >= state.get("deadline", 0)
+                or time.monotonic() >= state.get("deadline_monotonic", float("inf")))
+
+    def commit(self, state):
+        state["status"] = "applied"
+        result = self.record(state)
+        atomic_write(self.config.data_dir / "run/receipt.json", json.dumps(result).encode(), 0o640)
+        (self.config.data_dir / "run/apply-journal.json").unlink(missing_ok=True)
+        return result
+
+    def rollback(self, state, reason):
+        state.update(status="rolling_back", reason=reason)
+        self.write_journal(state)
+        # Halt independently of SQLite/worker availability, before any recovery commands.
+        atomic_write(self.config.data_dir / "run/safety-halted.json", b'{"halted":true}', 0o640)
+        try:
+            previous = state.get("previous")
+            if not previous:
+                raise ValueError("No confirmed revision is available")
             self.switch(previous)
-            self.reload(before)
-        journal.unlink()
+            self.validate(self.config.data_dir / "revisions" / previous)
+            try:
+                before = self.generation()
+            except Exception:
+                before = None
+            state["rollback_generation"] = self.reload(before)
+            if self.config.safe_apply:
+                plans = [SafetyCheck.model_validate({
+                    **p, "revision": previous if p.get("revision") and state.get("previous_has_marker") else "",
+                }) for p in state.get("plans", [])]
+                state["rollback_checks"] = self.probe_plans(plans, attempts=3)
+                if not all(check["ok"] for check in state["rollback_checks"]):
+                    raise ValueError("Recovery route checks failed")
+            state["status"] = "rolled_back"
+            result = self.record(state)
+            (self.config.data_dir / "run/apply-journal.json").unlink(missing_ok=True)
+            return result
+        except Exception as error:
+            state["status"] = "rollback_failed"
+            self.write_journal(state)
+            self.record(state)
+            raise RuntimeError("rollback_failed: further applies require local recovery") from error
+
+    def recover(self):
+        # Caller holds the apply lock. Used on agent/watchdog restart, not every apply.
+        state = self.read_json("apply-journal.json")
+        if state:
+            state.setdefault("revision_id", state["candidate"])
+            # A durable receipt wins over an interrupted journal cleanup after commit.
+            receipt = self.read_json("receipt.json", {})
+            if receipt.get("revision_id") == state["revision_id"] and self.current() == state["revision_id"]:
+                (self.config.data_dir / "run/apply-journal.json").unlink(missing_ok=True)
+                return
+            return self.rollback(state, "restart")
+
+    def watchdog_tick(self):
+        with self.lock():
+            state = self.read_json("apply-journal.json")
+            if not state or state.get("status") == "rollback_failed":
+                return
+            if self.expired(state) or state.get("status") == "rolling_back":
+                return self.rollback(state, state.get("reason", "timeout"))
+            checks = self.run_checks(state)
+            state["checks"] = checks
+            if not all(item["ok"] for item in checks):
+                state["failures"] = state.get("failures", 0) + 1
+                if state["failures"] >= 3:
+                    return self.rollback(state, "health_failed")
+            else:
+                state["failures"] = 0
+            self.write_journal(state)
+
+    def watch(self, stop):
+        while not stop.wait(2):
+            try:
+                self.watchdog_tick()
+            except Exception:
+                # The durable journal is the diagnostic source; never log raw commands.
+                pass
+
+    def finish_trial(self, confirmation, rollback=False):
+        with self.lock():
+            state = self.read_json("apply-journal.json")
+            rid = str(confirmation.revision_id)
+            if not state or state.get("revision_id") != rid:
+                raise SafetyConflict("This revision is no longer awaiting confirmation")
+            if not secrets.compare_digest(state.get("token", ""), confirmation.token):
+                raise SafetyConflict("Invalid confirmation token")
+            if rollback:
+                return self.rollback(state, "cancelled")
+            if state.get("status") != "awaiting_confirmation" or self.expired(state):
+                self.rollback(state, "timeout")
+                raise SafetyConflict("The confirmation deadline has expired")
+            checks = self.run_checks(state, attempts=3)
+            state["checks"] = checks
+            self.write_journal(state)
+            if not all(item["ok"] for item in checks):
+                raise SafetyConflict("Required route checks have not passed")
+            if self.expired(state):
+                self.rollback(state, "timeout")
+                raise SafetyConflict("The confirmation deadline has expired")
+            return self.commit(state)
 
     def apply(self, deployment: Deployment):
         with self.lock():
-            self.recover()
-            directory = self.stage(deployment)
             rid = str(deployment.revision_id)
+            pending = self.read_json("apply-journal.json")
+            if pending:
+                if pending.get("revision_id") == rid:
+                    self.stage(deployment)
+                    return self.public_state(pending)
+                raise SafetyConflict("Another revision is awaiting confirmation or recovery")
+            existing = self.read_json("receipts/" + rid + ".json")
+            if existing:
+                self.stage(deployment)
+                return {**existing, "active_revision": self.current()}
+            if self.read_json("safety-halted.json"):
+                raise SafetyConflict("Applies are halted; inspect safety status and run apm resume-applies")
+            directory = self.stage(deployment)
             receipt = self.config.data_dir / "run/receipt.json"
             if receipt.exists():
                 existing = json.loads(receipt.read_text())
                 if existing["revision_id"] == rid and self.current() == rid:
                     return existing
-            self.validate(directory)
+            diagnostics = self.validate(directory)
             if self.config.angie_mode == "existing" and not self.current():
                 raise ValueError("Run apm bootstrap-agent before applying to an existing Angie")
             before = self.generation()
             previous = self.current()
-            journal = self.config.data_dir / "run/apply-journal.json"
-            atomic_write(journal, json.dumps({"previous": previous, "candidate": rid}).encode())
+            plans = self.plans(rid) if self.config.safe_apply else []
+            # Establish the contract before activation; a pre-existing failure is not a regression.
+            baseline = check_routes([p.model_copy(update={"revision": ""}) for p in plans])
+            required = {item["name"] for item in baseline if item["ok"]}
+            plans = [p for p in plans if p.name == "APM" or p.name in required]
+            if self.config.safe_apply and deployment.confirmation == "automatic" and not all(
+                item["ok"] for item in baseline
+            ):
+                raise SafetyConflict("Required route checks must pass before automatic apply")
+            state = {
+                "revision_id": rid, "candidate": rid, "previous": previous,
+                "previous_revision_id": previous, "status": "applying", "warnings": diagnostics,
+                "previous_has_marker": bool(previous and "add_header X-APM-Revision " in (
+                    self.config.data_dir / "revisions" / previous / "angie.conf"
+                ).read_text()),
+                "started_at": time.time(), "deadline": time.time() + self.config.safe_apply_timeout,
+                "deadline_monotonic": time.monotonic() + self.config.safe_apply_timeout,
+                "plans": [p.model_dump() for p in plans], "baseline": baseline,
+                "token": secrets.token_urlsafe(32), "owner_id": deployment.owner_id,
+                "owner_session": deployment.owner_session,
+            }
+            self.write_journal(state)
             try:
                 self.switch(rid)
                 generation = self.reload(before)
+                state["generation"] = generation
+                checks = self.run_checks(state, attempts=3)
+                state["checks"] = checks
+                if not all(item["ok"] for item in checks):
+                    raise ValueError("Required route checks failed")
+                if self.expired(state):
+                    raise ValueError("The confirmation deadline has expired")
             except Exception as original:
-                try:
-                    if previous:
-                        current_generation = self.generation()
-                        self.switch(previous)
-                        self.reload(current_generation)
-                    journal.unlink(missing_ok=True)
-                except Exception as rollback:
-                    raise RuntimeError(
-                        "rollback_failed: further applies require local recovery"
-                    ) from rollback
+                self.rollback(state, "activation_failed")
                 raise ValueError("Candidate was not activated; previous revision restored") from original
-            result = {"revision_id": rid, "previous_revision_id": previous, "generation": generation}
-            atomic_write(receipt, json.dumps(result).encode(), 0o640)
-            journal.unlink(missing_ok=True)
-            return result
+            if self.config.safe_apply and deployment.confirmation == "manual":
+                state["status"] = "awaiting_confirmation"
+                self.write_journal(state)
+                return self.public_state(state)
+            return self.commit(state)
 
 
 def create_agent(config=None):
@@ -361,9 +595,26 @@ def create_agent(config=None):
     async def lifespan(app):
         with (config.data_dir / "run/maintenance.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_SH)
-            yield
+            with agent.lock():
+                try:
+                    agent.recover()
+                except RuntimeError:
+                    pass
+            stop = threading.Event()
+            watchdog = threading.Thread(target=agent.watch, args=(stop,), daemon=True)
+            watchdog.start()
+            try:
+                yield
+            finally:
+                stop.set()
+                watchdog.join(timeout=5)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, error):
+        # Pydantic's default error response can echo the entire private bundle/token.
+        return JSONResponse({"detail": "Invalid agent request"}, status_code=422)
 
     @app.get("/capabilities")
     def capabilities():
@@ -381,10 +632,30 @@ def create_agent(config=None):
         try:
             with agent.lock():
                 directory = agent.stage(data)
-                agent.validate(directory)
-            return {"valid": True}
+                diagnostics = agent.validate(directory)
+            return {"valid": True, "warnings": diagnostics}
         except Exception as error:
-            raise HTTPException(422, str(error)) from error
+            return JSONResponse({"detail": str(error), "warnings": getattr(error, "warnings", [])}, status_code=422)
+
+    @app.get("/safety")
+    def safety():
+        return agent.safety(private=True)
+
+    @app.post("/safety/confirm")
+    def confirm_trial(data: Confirmation):
+        try:
+            return agent.finish_trial(data)
+        except SafetyConflict as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/safety/rollback")
+    def rollback_trial(data: Confirmation):
+        try:
+            return agent.finish_trial(data, rollback=True)
+        except SafetyConflict as error:
+            raise HTTPException(409, str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(503, str(error)) from error
 
     @app.get("/metrics")
     def metrics():
@@ -408,6 +679,8 @@ def create_agent(config=None):
     def apply(data: Deployment):
         try:
             return agent.apply(data)
+        except SafetyConflict as error:
+            raise HTTPException(409, str(error)) from error
         except RuntimeError as error:
             raise HTTPException(503, str(error)) from error
         except Exception as error:

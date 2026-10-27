@@ -269,3 +269,23 @@ Directory URL ACME CA для автоматически создаваемых �
 Параметр Compose/build, не Settings Python. По умолчанию docker.angie.software/angie:1.12.4-debian. Выбирайте образ с нужными совместимыми модулями; PRO требует вашей лицензии.
 
 [Compose](deployment.md) · [Docker discovery](discovery.md) · [Runtime](runtime.md)
+
+
+## `APM_SAFE_APPLY`
+
+<!-- environment:APM_SAFE_APPLY -->
+Безопасное применение, по умолчанию true. Ручные изменения ждут явного подтверждения в панели; автоматические фиксируются после обязательных проверок. false отключает пробный период и проверки маршрутов, сохраняя angie -t и откат при ошибке reload. Настройка должна совпадать у manager, worker и агента.
+
+## `APM_SAFE_APPLY_TIMEOUT`
+
+<!-- environment:APM_SAFE_APPLY_TIMEOUT -->
+Срок подтверждения в секундах: 30–600, по умолчанию 120. Таймер включается до переключения current; перезапуск не продлевает пробу.
+
+## `APM_SAFE_APPLY_CHECKS`
+
+<!-- environment:APM_SAFE_APPLY_CHECKS -->
+JSON-массив до 32 проверок опубликованных маршрутов, по умолчанию []. Проверка панели APM добавляется автоматически. Имена name уникальны; APM зарезервировано. Поля: scheme (http/https/tcp/tls), host (адрес listener Angie), port, path (по умолчанию /), server_name (SNI), host_header, expected_statuses (по умолчанию [200]), body_contains (поиск в первых 64 KiB), verify (true), ca_file (необязательный доверенный CA). Для TCP/TLS проверяется подключение, без проверки прикладного протокола. Запросы выполняются агентом в сети Angie, с новыми соединениями. Локальная проверка не подтверждает доступность из внешней сети.
+
+```dotenv
+APM_SAFE_APPLY_CHECKS='[{"name":"Portal","scheme":"https","host":"127.0.0.1","port":443,"server_name":"portal.example.com","host_header":"portal.example.com","path":"/health","expected_statuses":[200],"body_contains":"ok"}]'
+```

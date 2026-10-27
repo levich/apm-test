@@ -269,3 +269,23 @@ Format: `boolean`. Example: `false`.
 Compose/build input rather than a Python setting. Default docker.angie.software/angie:1.12.4-debian. Select an image with compatible required modules; PRO requires your own license.
 
 [Compose](deployment.md) · [Docker discovery](discovery.md) · [Runtime](runtime.md)
+
+
+## `APM_SAFE_APPLY`
+
+<!-- environment:APM_SAFE_APPLY -->
+Safe application, true by default. Manual changes require explicit confirmation in the panel; automatic changes commit after required checks. false disables the trial and route checks, preserving angie -t and rollback on reload failure. Use the same value for manager, worker and agent.
+
+## `APM_SAFE_APPLY_TIMEOUT`
+
+<!-- environment:APM_SAFE_APPLY_TIMEOUT -->
+Confirmation deadline in seconds: 30–600, default 120. The timer is armed before switching current; restarting does not extend the trial.
+
+## `APM_SAFE_APPLY_CHECKS`
+
+<!-- environment:APM_SAFE_APPLY_CHECKS -->
+JSON array of up to 32 published-route checks, default []. An APM panel check is added automatically. name values must be unique; APM is reserved. Fields: scheme (http/https/tcp/tls), host (Angie listener address), port, path (default /), server_name (SNI), host_header, expected_statuses (default [200]), body_contains (first 64 KiB), verify (true), ca_file (optional trusted CA). TCP/TLS checks test connection establishment, not application protocol behavior. The agent uses fresh connections in Angie’s network. Local checks do not prove external reachability.
+
+```dotenv
+APM_SAFE_APPLY_CHECKS='[{"name":"Portal","scheme":"https","host":"127.0.0.1","port":443,"server_name":"portal.example.com","host_header":"portal.example.com","path":"/health","expected_statuses":[200],"body_contains":"ok"}]'
+```

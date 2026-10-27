@@ -57,12 +57,18 @@ sudo usermod --append --groups 10001 angie
 
 ```sh
 sudo install -m 644 deploy/existing/apm-agent.service /etc/systemd/system/apm-agent.service
+sudo install -m 644 deploy/existing/apm-safety-watchdog.service /etc/systemd/system/apm-safety-watchdog.service
+sudo install -d /etc/systemd/system/angie.service.d
+sudo install -m 644 deploy/existing/angie-apm-safety.conf /etc/systemd/system/angie.service.d/apm-safety.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now apm-agent
+sudo systemctl enable --now apm-safety-watchdog
 sudo systemctl status apm-agent --no-pager
 ```
 
 `ExecStartPre` выполняет `apm bootstrap-agent`: создаёт начальную версию с пустыми включениями, сохраняя основной конфиг и не выполняя reload. Повторный запуск сохраняет текущую версию; отсутствие основного конфига считается ошибкой. Агент слушает `/srv/apm/run/agent.sock`, TCP-порт не открывается.
+
+Drop-in `angie-apm-safety.conf` также запускает bootstrap перед стартом самого Angie: незавершённая проба возвращается к подтверждённым файлам до открытия listener. Независимый `apm-safety-watchdog` контролирует срок и проверки даже при остановленном HTTP API агента. При изменении путей установки обновляйте все три шаблона. Для удаления APM сначала уберите его drop-in и include из конфигурации Angie.
 
 В systemd заданы `Group=10001` и `UMask=0007` для подключения worker к сокету. EnvironmentFile читает `.env.existing`; при изменении настроек перезапустите агент и пересоздайте контейнеры с тем же env-файлом.
 

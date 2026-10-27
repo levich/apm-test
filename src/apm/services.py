@@ -66,8 +66,53 @@ def enqueue_apply(session, context=None):
     revision = Revision(id=uid(), snapshot=snapshot(session))
     session.add(revision)
     session.flush()
-    job = enqueue(session, "apply", {"revision_id": revision.id}, context=context)
+    owner = session.info.get("apply_owner", {})
+    job = enqueue(session, "apply", {
+        "revision_id": revision.id,
+        "confirmation": "manual" if owner else "automatic",
+        **owner,
+    }, context=context)
     return {"operation_id": job.id, "revision_id": revision.id}
+
+
+def sync_safety(session, result):
+    """Reconcile the agent's durable outcome, including after a worker/manager restart."""
+    from apm.db import state_get
+
+    revision_id = result.get("revision_id")
+    revision = session.get(Revision, revision_id) if revision_id else None
+    status = result.get("status", "applied")
+    if result.get("halted") or (revision and revision.status != status
+                                and status in ("rolled_back", "rollback_failed")):
+        state_set(session, "apply_halted", {"halted": True, "revision_id": revision_id})
+    if not revision or status not in ("applied", "awaiting_confirmation", "rolled_back", "rollback_failed"):
+        return
+    if revision.status == status:
+        return
+    revision.status = status
+    revision.generation = result.get("generation")
+    error = None
+    if status in ("rolled_back", "rollback_failed"):
+        error = ("rollback_failed: local recovery required" if status == "rollback_failed"
+                 else "previous revision restored: " + result.get("reason", "rollback"))
+        revision.error = error
+        if result.get("previous_revision_id"):
+            applied = state_get(session, "applied", {})
+            state_set(session, "applied", {
+                **applied, "revision_id": result["previous_revision_id"],
+                "generation": result.get("rollback_generation"),
+            })
+    if status == "applied" and result.get("active_revision", revision_id) == revision_id:
+        state_set(session, "applied", result)
+    for job in session.scalars(select(Job).where(Job.kind == "apply")):
+        if job.payload.get("revision_id") != revision_id:
+            continue
+        job.status = ("succeeded" if status == "applied" else "awaiting_confirmation"
+                      if status == "awaiting_confirmation" else "failed")
+        job.result = {**job.result, **result}
+        job.error = error
+        job.updated_at = now()
+    audit(session, "agent", "revision." + status, revision_id, generation=result.get("generation"))
 
 
 def require_role(user, *roles):

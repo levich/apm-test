@@ -54,6 +54,7 @@ def main():
             _env_file=None,
             data_dir=data,
             angie_mode="existing",
+            safe_apply=False,
             angie_binary=str(Path(args.binary).resolve()),
             angie_config=root / "angie.conf",
             angie_prefix=root,

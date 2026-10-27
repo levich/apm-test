@@ -79,6 +79,12 @@ def main():
         def wait(operation_id):
             for _ in range(60):
                 job = client.get("/api/v1/operations/" + operation_id).json()
+                if job["status"] == "awaiting_confirmation":
+                    trial = client.get("/api/v1/safety").json()
+                    confirmed = client.post("/api/v1/safety/confirm", json={
+                        "revision_id": trial["revision_id"], "token": trial["token"],
+                    })
+                    assert confirmed.is_success, confirmed.text
                 if job["status"] in ("failed", "succeeded"):
                     return job
                 time.sleep(1)

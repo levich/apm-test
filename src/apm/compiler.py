@@ -586,7 +586,9 @@ class Compiler:
             f"ssl_certificate {q(root / 'bootstrap/fullchain.pem')};",
             f"ssl_certificate_key {q(root / 'bootstrap/privkey.pem')};",
             "add_header X-Content-Type-Options nosniff always;",
+            f"add_header X-APM-Revision {q(self.root.name)} always;",
             f"location / {{ proxy_pass {q(self.settings.backend_url)}; proxy_set_header Host $http_host;",
+            f"proxy_set_header X-APM-Revision {q(self.root.name)};",
             "proxy_set_header X-Forwarded-Proto https; proxy_buffering off; } }",
         ]
         default_return = r.get("default_response", "404")

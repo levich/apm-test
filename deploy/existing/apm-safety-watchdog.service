@@ -1,0 +1,17 @@
+[Unit]
+Description=APM independent configuration rollback watchdog
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/apm
+EnvironmentFile=/opt/apm/.env.existing
+User=root
+Group=10001
+UMask=0007
+ExecStart=/opt/apm/.venv/bin/apm safety-watchdog
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

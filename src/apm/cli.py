@@ -1,6 +1,7 @@
 import fcntl
 import json
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -192,11 +193,60 @@ def resume_applies():
     """Use after locally repairing Angie and inspecting the apply journal."""
     config = Settings()
     db = database(config)
-    if (config.data_dir / "run/apply-journal.json").exists():
-        raise typer.BadParameter("Resolve the agent apply journal first")
-    with db.session() as session:
-        state_set(session, "apply_halted", {"halted": False})
-    typer.echo("Apply queue resumed")
+    from apm.agent import Agent
+    from apm.db import Job, Revision, now
+    from apm.services import sync_safety
+
+    agent = Agent(config)
+    with agent.lock():
+        if (config.data_dir / "run/apply-journal.json").exists():
+            raise typer.BadParameter("Resolve the agent apply journal first")
+        with db.session() as session:
+            sync_safety(session, agent.read_json("safety-status.json", {}))
+            # Queued snapshots can still contain the rejected settings. Require a fresh apply.
+            for job in session.scalars(select(Job).where(Job.kind == "apply", Job.status == "pending")):
+                job.status, job.error, job.updated_at = "failed", "Cancelled during local safety recovery", now()
+                revision = session.get(Revision, job.payload.get("revision_id"))
+                if revision:
+                    revision.status, revision.error = "failed", job.error
+            state_set(session, "apply_halted", {"halted": False})
+        (config.data_dir / "run/safety-halted.json").unlink(missing_ok=True)
+    typer.echo("Apply queue resumed; stale queued applies cancelled. Review the desired settings and save again.")
+
+
+@app.command()
+def safety_status():
+    """Inspect the local safety journal without manager, worker or HTTP access."""
+    from apm.agent import Agent
+
+    typer.echo(json.dumps(Agent(Settings()).safety(), indent=2))
+
+
+@app.command()
+def safety_rollback():
+    """Restore the confirmed revision from an outstanding/failed trial locally."""
+    from apm.agent import Agent
+
+    agent = Agent(Settings())
+    with agent.lock():
+        state = agent.read_json("apply-journal.json")
+        if not state:
+            raise typer.BadParameter("No trial or recovery journal exists")
+        typer.echo(json.dumps(agent.rollback(state, "local_cli"), indent=2))
+
+
+@app.command()
+def safety_watchdog():
+    """Run recovery independently of the Unix API and its HTTP server."""
+    from apm.agent import Agent
+
+    agent = Agent(Settings())
+    with agent.lock():
+        try:
+            agent.recover()
+        except RuntimeError:
+            pass
+    agent.watch(threading.Event())
 
 
 @app.command()
