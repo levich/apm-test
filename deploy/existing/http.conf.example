@@ -5,7 +5,9 @@ include /srv/apm/current/http.conf;
 # Reuse an existing local Angie API endpoint instead if one is already configured.
 server {
     listen 127.0.0.1:18081;
-    location /status/ { api /status/; }
+    location /status/ {
+        api /status/;
+    }
 }
 
 server {

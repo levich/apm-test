@@ -1489,6 +1489,60 @@ async function logs() {
   if (Number.isInteger(savedOffset) && savedOffset >= 0 && savedOffset <= 10000) offset = savedOffset;
   await refreshLogs();
 }
+let configurationFile = "";
+let configurationRequest = 0;
+async function configuration() {
+  const request = ++configurationRequest;
+  const result = await api("/api/v1/configuration");
+  if (request !== configurationRequest) return;
+  document.getElementById("notice").classList.add("d-none");
+  const hint = el("p", { class: "text-secondary", text: t.config_hint });
+  if (!result.revision_id || !result.files.length) {
+    content.replaceChildren(hint, card(t.config_files, el("p", { class: "mb-0", text: t.config_empty })));
+    return;
+  }
+  const selector = el("select", { id: "config-file", class: "form-select" });
+  for (const file of result.files) selector.append(el("option", { value: file.path, text: file.path }));
+  selector.value = result.files.some((file) => file.path === configurationFile)
+    ? configurationFile : result.files[0].path;
+  const code = el("code");
+  const preview = el("pre", { id: "config-content", class: "config-preview", tabindex: "0",
+    "aria-label": t.config_select }, [code]);
+  const filename = el("div", { id: "config-path", class: "font-monospace config-path" });
+  let selection = 0;
+  async function showFile() {
+    const selected = ++selection;
+    configurationFile = selector.value;
+    filename.textContent = selector.value;
+    preview.setAttribute("aria-label", selector.value);
+    code.textContent = t.loading;
+    preview.setAttribute("aria-busy", "true");
+    try {
+      const query = new URLSearchParams({ revision_id: result.revision_id, path: selector.value });
+      const file = await api(`/api/v1/configuration/file?${query}`);
+      if (selected !== selection || request !== configurationRequest) return;
+      code.textContent = file.content;
+      preview.scrollTop = 0;
+      preview.scrollLeft = 0;
+    } catch (error) {
+      if (selected === selection && request === configurationRequest) {
+        code.textContent = "";
+        message(error.message, true);
+      }
+    } finally {
+      if (selected === selection) preview.setAttribute("aria-busy", "false");
+    }
+  }
+  selector.addEventListener("change", showFile);
+  content.replaceChildren(hint, card(t.config_files, el("div", { class: "config-viewer" }, [
+    el("p", { class: "text-secondary config-revision" }, [text(`${t.config_revision}: `),
+      el("span", { class: "font-monospace", text: result.revision_id })]),
+    ...(result.mode === "existing" ? [el("p", { class: "text-secondary", text: t.config_existing })] : []),
+    el("label", { for: "config-file", class: "form-label", text: t.config_file }), selector,
+    filename, preview, el("small", { class: "text-secondary", text: t.config_sensitive }),
+  ])));
+  await showFile();
+}
 async function metrics() {
   const result = await api("/api/v1/metrics");
   const body = el("pre", {
@@ -1609,6 +1663,7 @@ async function load() {
     else if (page === "security") await security();
     else if (page === "logs") await logs();
     else if (page === "metrics") await metrics();
+    else if (page === "configuration") await configuration();
     else await resources();
   } catch (error) {
     message(error.message, true);

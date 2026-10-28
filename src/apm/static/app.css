@@ -22,6 +22,26 @@
 .log-summary { justify-content: space-between; margin-bottom: 12px; font-size: 13px; }
 .log-pagination { justify-content: flex-end; margin-top: 16px; }
 .log-results { margin-top: 12px; min-width: 0; }
+.config-viewer { min-width: 0; }
+.config-revision, .config-path { overflow-wrap: anywhere; }
+.config-path { margin: 20px 0 8px; font-size: 13px; }
+.config-preview {
+  max-width: 100%;
+  max-height: 65vh;
+  min-height: 180px;
+  margin-bottom: 12px;
+  padding: 16px;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 4;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: 6px;
+  background: var(--tblr-bg-surface-secondary);
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.config-preview code { color: inherit; padding: 0; background: transparent; }
 .log-results[aria-busy="true"] { opacity: 0.6; }
 .log-table td { vertical-align: top; font-size: 13px; }
 .log-table td:first-child { white-space: nowrap; }

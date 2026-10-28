@@ -2,14 +2,81 @@
 
 import argparse
 import json
+import uuid
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 from sqlalchemy import select
 
-from apm.agent import bootstrap_certificate
+from apm.agent import Agent, Deployment, bootstrap_certificate
+from apm.compiler import Compiler
 from apm.config import Settings
 from apm.db import Database, Job
+from apm.schemas import Route, Stream
+
+
+def check_configuration(page, args):
+    page.goto(args.url + "/ui/configuration")
+    if page.locator("html").get_attribute("lang") != "ru":
+        page.locator("#language-switch").click()
+        expect(page.locator("html")).to_have_attribute("lang", "ru")
+    expect(page.locator("#content")).to_contain_text("Активной конфигурации пока нет")
+    config = Settings(_env_file=None, data_dir=args.data, safe_apply=False)
+    agent = Agent(config)
+
+    def stage(name):
+        revision = uuid.uuid4()
+        resources = [
+            {"id": "browser-portal", "kind": "proxy-hosts", "name": name,
+             "data": Route(domains=["portal.example.test"], advanced=(
+                 '# <img src=x onerror="alert(1)">\nadd_header X-Long "' + "x" * 300 + '";'
+             )).model_dump()},
+            {"id": "browser-stream", "kind": "streams", "name": "Mail",
+             "data": Stream(listen_port=19080, host="127.0.0.1", port=8080).model_dump()},
+        ]
+        bundle = Compiler(config, {}, config.data_dir / "revisions" / str(revision)).compile(resources)
+        bundle.files.update({"crowdsec.conf": "API_KEY=browser-fixture", "auth/users.htpasswd": "fixture:hash"})
+        agent.stage(Deployment(revision_id=revision, configuration=bundle.config, files=bundle.files))
+        return revision, bundle
+
+    revision, bundle = stage("Portal")
+    page.locator("#refresh").click()
+    expect(page.locator("#content")).to_contain_text("Активной конфигурации пока нет")
+    agent.switch(str(revision))
+    page.locator("#refresh").click()
+    selector = page.locator("#config-file")
+    expect(selector).to_have_value("angie.conf")
+    expect(page.locator("#config-content code")).to_have_text(bundle.config)
+    assert selector.locator("option").all_text_contents() == [
+        "angie.conf", "http/portal.proxy.conf", "stream/mail.stream.conf"]
+    selector.select_option("http/portal.proxy.conf")
+    expect(page.locator("#config-content code")).to_have_text(bundle.files["http/portal.proxy.conf"])
+    assert page.locator("#config-content img").count() == 0
+    assert page.locator("#config-content textarea").count() == 0
+    page.screenshot(path=str(args.output / "configuration-ru.png"), full_page=True)
+    page.locator("#refresh").click()
+    expect(selector).to_have_value("http/portal.proxy.conf")
+    selector.select_option("stream/mail.stream.conf")
+    expect(page.locator("#config-content code")).to_have_text(bundle.files["stream/mail.stream.conf"])
+    next_revision, _ = stage("Renamed portal")
+    agent.switch(str(next_revision))
+    page.locator("#refresh").click()
+    expect(page.locator(".config-revision")).to_contain_text(str(next_revision))
+    assert "http/portal.proxy.conf" not in selector.locator("option").all_text_contents()
+    agent.switch(str(revision))
+    page.locator("#refresh").click()
+    expect(page.locator(".config-revision")).to_contain_text(str(revision))
+    page.locator("#language-switch").click()
+    expect(page.locator("h1")).to_have_text("Configuration")
+    selector.select_option("http/portal.proxy.conf")
+    expect(page.locator("#config-content code")).to_have_text(bundle.files["http/portal.proxy.conf"])
+    page.locator("#theme-switch").click()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(args.output / "configuration-mobile-dark.png"), full_page=True)
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.locator("#theme-switch").click()
+    page.locator("#language-switch").click()
 
 
 def check_safety(page, args):
@@ -215,6 +282,7 @@ def main():
         page.wait_for_url("**/ui/dashboard")
         page.wait_for_selector(".dashboard-grid")
         page.screenshot(path=str(args.output / "dashboard.png"), full_page=True)
+        check_configuration(page, args)
         check_logs(page, args)
         page.goto(args.url + "/ui/proxy-hosts")
         page.locator("#create").click()
@@ -579,7 +647,7 @@ def main():
         assert not errors, errors
         assert not network, network
         print(
-            "Browser checks passed: safety countdown/confirmation/rollback, required checks and route identity, Angie access/error logs, search/filters/pagination/auto refresh, proxy links/availability, backend TLS verification/SNI persistence, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
+            "Browser checks passed: active configuration files/selection/refresh/rollback/escaping, safety countdown/confirmation/rollback, required checks and route identity, Angie access/error logs, search/filters/pagination/auto refresh, proxy links/availability, backend TLS verification/SNI persistence, locations, HTTP/DNS certificates, forced reissue/deduplication, PEM upload/validity dates, operation messages, ACL help, packaged RU/EN documentation, mobile/dark theme, Escape/focus; no JS/HTTP errors"
         )
         browser.close()
 

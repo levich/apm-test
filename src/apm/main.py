@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 import pyotp
@@ -17,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from apm import __version__
 from apm.config import Settings
+from apm.configuration import list_configuration, read_configuration
 from apm.db import (
     Audit,
     Database,
@@ -402,6 +404,14 @@ def create_app(config=None):
             }
             for r in session.scalars(select(Revision).order_by(Revision.created_at.desc()).limit(100))
         ]
+
+    @app.get("/api/v1/configuration")
+    def configuration(user=Depends(admin)):
+        return list_configuration(config)
+
+    @app.get("/api/v1/configuration/file")
+    def configuration_file(revision_id: UUID, path: str, user=Depends(admin)):
+        return read_configuration(config, revision_id, path)
 
     def agent_safety(path="/safety", body=None):
         try:
@@ -821,8 +831,11 @@ def create_app(config=None):
             "logs",
             "metrics",
             "documentation",
+            "configuration",
         ):
             raise HTTPException(404)
+        if page == "configuration":
+            require_role(user, "admin")
         language = request.cookies.get("apm_language", user.language)
         documentation_context = {}
         if page == "documentation":

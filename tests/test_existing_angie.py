@@ -94,7 +94,7 @@ def test_existing_compiler_scopes_policies_to_apm_hosts(existing):
     assert "bootstrap" not in http
     assert "load_module" not in bundle.configuration
     assert "pid " not in bundle.configuration
-    assert bundle.files["stream/tcp.stream.conf"].startswith("server {\naccess_log off;\n")
+    assert "server {\n    access_log off;\n" in bundle.files["stream/tcp.stream.conf"]
     assert 'stream/tcp.stream.conf";' in bundle.files["stream.conf"]
 
 

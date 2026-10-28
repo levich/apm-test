@@ -50,6 +50,7 @@ Compiler формирует `http.conf` и `stream.conf` внутри каждо
 | `PUT/DELETE /api/v1/resources/{kind}/{id}` | Изменение/удаление с `If-Match` |
 | `GET /api/v1/operations[/{id}]` | Статус долгих операций |
 | `GET /api/v1/revisions` | История без секретов и приватных snapshot |
+| `GET /api/v1/configuration`, `GET /api/v1/configuration/file` | Admin: список и чтение конфигов активной ревизии с диска; без секретных вспомогательных файлов |
 | `POST /api/v1/revisions/apply` | Повторная генерация текущего состояния |
 | `GET /api/v1/safety` | Проба, срок, проверки и доступность подтверждения |
 | `POST /api/v1/safety/confirm`, `/rollback` | Решение по ревизии с приватным токеном и CSRF |

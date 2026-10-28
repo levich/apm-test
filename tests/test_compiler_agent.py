@@ -52,7 +52,7 @@ def test_authentik_start_callback_and_cookie_forwarding(config, mode, prefix):
         resource("auth-providers", profile.model_dump(), provider_id), resource("proxy-hosts", body),
     ]))
     assert f'return 302 "{prefix}?rd=$scheme://$apm_original_host$request_uri";' in text
-    assert "location ^~ /outpost.goauthentik.io/ {\nauth_request off;" in text
+    assert re.search(r"location \^~ /outpost\.goauthentik\.io/ \{\s+auth_request off;", text)
     assert 'proxy_pass "https://auth.example.test/outpost.goauthentik.io/";' in text
     assert "proxy_set_header Host $proxy_host;" in text
     assert "proxy_set_header X-Forwarded-Host $apm_original_host;" in text
@@ -98,7 +98,7 @@ def test_tls_pending_never_exposes_plaintext_backend(config):
         Compiler(config, {}, config.data_dir / "revisions/test")
         .compile([resource("proxy-hosts", data)])
     )
-    assert "location / { return 503; }" in text
+    assert re.search(r"location / \{\s+return 503;\s+\}", text)
     assert 'proxy_pass "http://127.0.0.1:8080' not in text
     assert "/.well-known/acme-challenge/" in text
 
@@ -112,7 +112,7 @@ def test_acl_preserves_order_and_hashes(config):
     result = Compiler(
         config, {}, config.data_dir / "revisions/test", lambda _: {"user": "$6$abc$hash"}
     ).compile([resource("access-lists", access, acl_id), resource("proxy-hosts", route)])
-    assert "allow 10.0.0.0/8;\ndeny all;" in bundle_text(result)
+    assert re.search(r"allow 10\.0\.0\.0/8;\s+deny all;", bundle_text(result))
     assert "xn--e1afmkfd.xn--p1ai" in bundle_text(result)
     assert any("user:$6$abc$hash" in value for value in result.files.values())
 

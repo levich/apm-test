@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from apm.config import Settings
+from apm.nginx import Snippet, render_config
 
 
 class CompileError(ValueError):
@@ -73,7 +74,9 @@ class Compiler:
         if scope == "http" and self.settings.angie_mode == "existing":
             lines = [part for line in lines
                      for part in ([line, *self.http_policy] if line == "server {" else [line])]
-        self.files[name] = "\n".join(lines) + "\n"
+        label = {"proxy": "Proxy host", "redirect": "Redirect host", "stream": "TCP/UDP stream",
+                 "site": "Static/PHP site", "upstream": "Upstream group"}[kind]
+        self.files[name] = render_config(lines, f"{label}: {obj.get('name', obj['id'])} ({scope}).")
         return f"include {q(self.root / name)};"
 
     def need(self, feature):
@@ -514,7 +517,7 @@ class Compiler:
         if authentik:
             lines += self.authentik_callback(authentik)
         if data.get("advanced"):
-            lines += ["# Administrator snippet", data["advanced"]]
+            lines += ["# Administrator snippet", Snippet(data["advanced"])]
         return [*lines, "}"]
 
     def compile(self, resources: list[dict]):
@@ -605,13 +608,15 @@ class Compiler:
                 "lua_package_path '/opt/apm/lua/?.lua;;';",
                 "lua_shared_dict crowdsec_cache 50m;",
                 "lua_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;",
-                'init_by_lua_block { _G.apm_cs = require("apm").init('
+                "init_by_lua_block {",
+                '_G.apm_cs = require("apm").init('
                 + q(self.root / "crowdsec.conf")
                 + ", "
                 + ("true" if policy.get("observe") else "false")
                 + ", "
                 + q(policy["failure_action"])
-                + "); }",
+                + ");",
+                "}",
             ]
         if r.get("mask_log_ips", True):
             http.insert(
@@ -647,7 +652,9 @@ class Compiler:
         if r.get("mptcp"):
             self.need("mptcp")
         managed_servers = [
+            "# Local status API.",
             "server { listen 127.0.0.1:18081; location /status/ { api /status/; } }",
+            "# Management panel.",
             f"server {{ listen {self.settings.admin_listen} ssl; server_name _;",
             f"ssl_certificate {q(root / 'bootstrap/fullchain.pem')};",
             f"ssl_certificate_key {q(root / 'bootstrap/privkey.pem')};",
@@ -670,6 +677,7 @@ class Compiler:
             action = f"location / {{ return {int(default_return)}; }}"
         default_listens = [line[:-1] + " default_server;" for line in self.listeners(None, False, False)]
         managed_servers += [
+            "# Default response for unrecognized HTTP hosts.",
             "server {",
             *default_listens,
             "server_name _;",
@@ -798,7 +806,9 @@ class Compiler:
                         f"proxy_ssl_verify {'on' if data['upstream_verify'] else 'off'};",
                         "proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;",
                     ]
-                stream += [data.get("advanced", ""), "}"]
+                if data.get("advanced"):
+                    stream += ["# Administrator snippet", Snippet(data["advanced"])]
+                stream.append("}")
             elif obj["kind"] == "sites":
                 cert = self.certificate(data.get("certificate_id"))
                 if data.get("certificate_id") and not cert:
@@ -871,11 +881,14 @@ class Compiler:
             http = [
                 part for line in http for part in ([line, *http_policy] if line == "server {" else [line])
             ]
-        http = [*self.http_extras, *http, r.get("http_snippet", "")]
-        stream.append(r.get("stream_snippet", ""))
+        http = [*self.http_extras, *http]
+        if r.get("http_snippet"):
+            http += ["# Administrator HTTP snippet", Snippet(r["http_snippet"])]
+        if r.get("stream_snippet"):
+            stream += ["# Administrator stream snippet", Snippet(r["stream_snippet"])]
         if existing:
-            self.files["http.conf"] = "\n".join(http) + "\n"
-            self.files["stream.conf"] = "\n".join(stream) + "\n"
+            self.files["http.conf"] = render_config(http, "HTTP includes and shared definitions.")
+            self.files["stream.conf"] = render_config(stream, "TCP/UDP includes and shared definitions.")
             return Bundle("# Managed includes for an existing Angie instance.\n", self.files)
         modules = []
         for path in self.caps.get("module_paths", []):
@@ -889,16 +902,18 @@ class Compiler:
             f"pid {q(root / 'run/angie.pid')};",
             f"error_log {q(root / 'logs/error.log')} warn;",
             f"events {{ worker_connections {r.get('worker_connections', 1024)}; }}",
+            "# HTTP services and routing.",
             "http {",
             *http,
             "}",
+            "# TCP/UDP services and routing.",
             "stream {",
             *stream,
             "}",
         ]
         if r.get("quic_bpf"):
             config.insert(0, "quic_bpf on;")
-        return Bundle("\n".join(config) + "\n", self.files)
+        return Bundle(render_config(config, "Main Angie configuration."), self.files)
 
 
 def snapshot_hash(snapshot):
