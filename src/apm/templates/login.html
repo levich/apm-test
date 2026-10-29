@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ t.setup if setup else t.login }} · {{ t.app }}</title>
   <link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/vendor/tabler.min.css">
-  <link rel="stylesheet" href="/static/app.css"><script defer src="/static/login.js"></script>
+  <link rel="stylesheet" href="{{ assets['app.css'] }}"><script defer src="{{ assets['login.js'] }}"></script>
 </head>
 <body class="d-flex flex-column login-page">
 <div class="page page-center"><div class="container container-tight py-4">

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 from contextlib import asynccontextmanager
@@ -89,6 +90,10 @@ def create_app(config=None):
     )
     app.mount("/static", StaticFiles(directory=PACKAGE / "static"), name="static")
     templates = Jinja2Templates(directory=PACKAGE / "templates")
+    templates.env.globals["assets"] = {
+        name: f"/static/{name}?v={hashlib.sha256((PACKAGE / 'static' / name).read_bytes()).hexdigest()[:16]}"
+        for name in ("app.js", "app.css", "login.js")
+    }
     oauth = OAuth()
     if config.oidc_issuer:
         secret = config.oidc_client_secret_file.read_text().strip() if config.oidc_client_secret_file else ""

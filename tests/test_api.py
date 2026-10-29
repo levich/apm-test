@@ -1,14 +1,48 @@
 import json
+import re
+import shutil
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from apm import main
 from apm.db import Resource, Revision
 from apm.security import Vault
 
 
 def host(domain="example.com"):
     return {"name": domain, "data": {"domains": [domain], "host": "127.0.0.1", "port": 8080}}
+
+
+def test_updated_assets_get_new_urls_without_changing_app_version(admin, config, tmp_path, monkeypatch):
+    def assets(client):
+        pages = [client.get("/ui/configuration"), client.get("/login")]
+        assert all(page.status_code == 200 for page in pages)
+        urls = dict(re.findall(
+            r'(?:src|href)="(/static/(?:app\.js|app\.css|login\.js))\?v=([a-f0-9]{16})"',
+            "".join(page.text for page in pages),
+        ))
+        assert set(urls) == {"/static/app.js", "/static/app.css", "/static/login.js"}
+        for path, version in urls.items():
+            assert client.get(path, params={"v": version}).status_code == 200
+        return urls
+
+    previous = assets(admin)
+    package = tmp_path / "package"
+    shutil.copytree(main.PACKAGE / "templates", package / "templates")
+    (package / "static").mkdir()
+    for name in ("app.js", "app.css", "login.js"):
+        shutil.copyfile(main.PACKAGE / "static" / name, package / "static" / name)
+    with (package / "static/app.js").open("a") as source:
+        source.write("\n// Next deployment\n")
+    monkeypatch.setattr(main, "PACKAGE", package)
+    with TestClient(main.create_app(config), base_url="https://testserver") as updated:
+        updated.cookies.update(admin.cookies)
+        current = assets(updated)
+    assert current["/static/app.js"] != previous["/static/app.js"]
+    assert current["/static/app.css"] == previous["/static/app.css"]
+    assert current["/static/login.js"] == previous["/static/login.js"]
 
 
 def test_setup_is_local_one_time_and_requires_strong_password(client, config):
